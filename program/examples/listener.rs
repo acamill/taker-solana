@@ -1,6 +1,5 @@
 use anyhow::Result;
 use solana_client::pubsub_client::PubsubClient;
-use solana_client::rpc_client::RpcClient;
 use solana_client::rpc_config::RpcTransactionLogsConfig;
 use solana_client::rpc_config::RpcTransactionLogsFilter;
 use solana_sdk::pubkey::Pubkey;

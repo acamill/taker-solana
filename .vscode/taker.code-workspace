@@ -1,0 +1,16 @@
+{
+	"folders": [
+		{
+			"name": "taker-solana",
+			"path": ".."
+		},
+		{
+			"name": "taker",
+			"path": "../../taker"
+		},
+		{
+			"path": "../../solana-program-library"
+		}
+	],
+	"settings": {}
+}

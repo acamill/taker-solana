@@ -1,7 +1,7 @@
 [package]
 authors = ["Weiyuan Wu <youngw@sfu.ca>"]
 edition = "2018"
-name = "tkr-token"
+name = "taker"
 version = "0.1.0"
 
 [features]
@@ -12,11 +12,14 @@ arrayref = "0.3.6"
 num-derive = "0.3"
 num-traits = "0.2"
 num_enum = "0.5.1"
-solana-program = "1.6.6"
-thiserror = "1.0"
+serde = {version = "1", features = ["derive"]}
+solana-program = "1.6"
 
 [dev-dependencies]
-solana-sdk = "1.6.6"
+anyhow = "1"
+solana-sdk = "1.6"
+structopt = "0.3"
+thiserror = "1.0"
 
 [lib]
 crate-type = ["cdylib", "lib"]
