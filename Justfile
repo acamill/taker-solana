@@ -1,8 +1,11 @@
-build-tkr:
-  cd program && cargo build-bpf
-  
-deploy-tkr:
-  solana program deploy target/deploy/tkr_token.so
+cli prog +ARGS="":
+  cd cli && cargo run --bin {{prog}} -- {{ARGS}}
 
-run name +ARGS="":
-  cargo run --bin {{name}} -- {{ARGS}}
+build:
+  cd program && cargo build-bpf
+
+deploy: build
+  cd program && solana program deploy target/deploy/taker.so 
+
+token +ARGS="":
+  spl-token {{ARGS}}

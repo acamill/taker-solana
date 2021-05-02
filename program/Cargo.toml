@@ -1,5 +1,6 @@
 [package]
 authors = ["Weiyuan Wu <youngw@sfu.ca>"]
+description = "Taker Protocol"
 edition = "2018"
 name = "taker"
 version = "0.1.0"
@@ -8,18 +9,18 @@ version = "0.1.0"
 no-entrypoint = []
 
 [dependencies]
-arrayref = "0.3.6"
+arrayref = "0.3"
+fehler = "1"
 num-derive = "0.3"
 num-traits = "0.2"
-num_enum = "0.5.1"
-serde = {version = "1", features = ["derive"]}
+num_enum = "0.5"
 solana-program = "1.6"
+spl-associated-token-account = {version = "1", features = ["no-entrypoint"]}
+spl-token = {version = "3.1", features = ["no-entrypoint"]}
+thiserror = "1"
 
 [dev-dependencies]
-anyhow = "1"
 solana-sdk = "1.6"
-structopt = "0.3"
-thiserror = "1.0"
 
 [lib]
 crate-type = ["cdylib", "lib"]
