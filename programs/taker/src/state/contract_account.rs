@@ -3,17 +3,33 @@
 use crate::instruction::MAX_SIGNERS;
 use arrayref::{array_mut_ref, array_ref, array_refs, mut_array_refs};
 use borsh::schema_helpers::try_to_vec_with_schema;
-use borsh::{BorshDeserialize, BorshSerialize};
+use borsh::{BorshDeserialize, BorshSchema, BorshSerialize};
 use num_enum::TryFromPrimitive;
-use solana_program::borsh;
+use solana_program::borsh::try_from_slice_unchecked;
 use solana_program::{
     program_error::ProgramError,
     program_option::COption,
     program_pack::{IsInitialized, Pack, Sealed},
     pubkey::Pubkey,
 };
+use std::collections::HashMap;
 
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    PartialEq,
+    PartialOrd,
+    Ord,
+    Eq,
+    Hash,
+    Default,
+    BorshSerialize,
+    BorshDeserialize,
+    BorshSchema,
+)]
 struct PackedPubKey([u32; 4]);
+
 impl From<PubKey> for PackedPubKey {
     fn from(pk: PubKey) -> Self {
         Self(pk.to_aligned_bytes())
@@ -38,14 +54,14 @@ pub struct Loan {
     stat: LoanStat,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, BorshSerialize, BorshDeserialize)]
+#[derive(Clone, Debug, Default, PartialEq, BorshSerialize, BorshSchema, BorshDeserialize)]
 pub struct ContractAccount {
     pub tkr_mint: PackedPubKey,
     pub tai_mint: PackedPubKey,
     pub dai_mint: PackedPubKey,
     pub is_initialized: bool,
-    pub nft_ownership: HashMap<Pubkey, Pubkey>,
-    pub nft_price_at_loan: HashMap<Pubkey, u64>,
+    pub nft_ownership: HashMap<PackedPubKey, PackedPubKey>,
+    pub nft_price_at_loan: HashMap<PackedPubKey, u64>,
     pub deposit_incentive: u64,
     pub max_loan_duration: u64,
     pub service_fee_rate: u64,
@@ -65,9 +81,9 @@ impl IsInitialized for ContractAccount {
 impl ContractAccount {
     pub fn new(tkr_mint: Pubkey, tai_mint: Pubkey, dai_mint: Pubkey) -> Self {
         Self {
-            tkr_mint,
-            tai_mint,
-            dai_mint,
+            tkr_mint: tkr_mint.into(),
+            tai_mint: tai_mint.into(),
+            dai_mint: dai_mint.into(),
             is_initialized: true,
             nft_ownership: HashMap::new(),
             nft_price_at_loan: HashMap::new(),
@@ -84,8 +100,9 @@ impl ContractAccount {
 
 impl Pack for ContractAccount {
     const LEN: usize = 9437184; // 9MB
+
     fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
-        let contract_account = borsh::try_from_slice_unchecked(src)?;
+        let contract_account = try_from_slice_unchecked(src)?;
         Ok(contract_account)
     }
 

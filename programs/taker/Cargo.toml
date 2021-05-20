@@ -9,8 +9,10 @@ version = "0.1.0"
 no-entrypoint = []
 
 [dependencies]
+anchor-lang = "0.5"
+anchor-spl = "0.5"
 arrayref = "0.3"
-borsh = "0.9"
+borsh = "0.8"
 fehler = "1"
 num-derive = "0.3"
 num-traits = "0.2"
@@ -25,6 +27,7 @@ solana-sdk = "1.6"
 
 [lib]
 crate-type = ["cdylib", "lib"]
+name = "taker"
 
 [package.metadata.docs.rs]
 targets = ["x86_64-unknown-linux-gnu"]

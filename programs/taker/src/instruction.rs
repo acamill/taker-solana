@@ -22,11 +22,11 @@ pub enum TakerInstruction {
     /// Initialize the Contract Account
     /// Accounts expected by this instruction:
     ///
-    ///   1. `[signer]` The fee payer for creating the Contract Account.
+    ///   1. `[s]` The fee payer for creating the Contract Account.
     ///   2. `[]` The TKR Mint.
     ///   3. `[]` The TAI Mint.
     ///   4. `[]` The DAI Mint.
-    ///   5. `[writable]` The Contract Account (uninitialized).
+    ///   5. `[w]` The Contract Account (uninitialized).
     ///
     Initialize,
     /// Accounts expected by this instruction:
