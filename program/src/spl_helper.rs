@@ -48,8 +48,7 @@ fn spl_token_init_mint<'a, 'b>(
         None,
         decimals,
     )?;
-    let result = invoke(&ix, &[mint, rent, token_program]);
-    result.map_err(|_| LendingError::TokenInitializeMintFailed.into())
+    invoke(&ix, &[mint, rent, token_program])
 }
 
 /// Issue a spl_token `Transfer` instruction.
@@ -62,7 +61,7 @@ fn spl_token_transfer<'a, 'b>(
     authority_signer_seeds: &'b [&'b [u8]],
     token_program: AccountInfo<'a>,
 ) -> ProgramResult {
-    let result = invoke_signed(
+    invoke_signed(
         &spl_token::instruction::transfer(
             token_program.key,
             source.key,
@@ -73,8 +72,7 @@ fn spl_token_transfer<'a, 'b>(
         )?,
         &[source, destination, authority, token_program],
         &[authority_signer_seeds],
-    );
-    result.map_err(|_| LendingError::TokenTransferFailed.into())
+    )
 }
 
 /// Issue a spl_token `MintTo` instruction.
@@ -86,7 +84,7 @@ fn spl_token_mint_to<'a, 'b>(
     authority_signer_seeds: &'b [&'b [u8]],
     token_program: AccountInfo<'a>,
 ) -> ProgramResult {
-    let result = invoke_signed(
+    invoke_signed(
         &spl_token::instruction::mint_to(
             token_program.key,
             mint.key,
@@ -97,8 +95,7 @@ fn spl_token_mint_to<'a, 'b>(
         )?,
         &[mint, destination, authority, token_program],
         &[authority_signer_seeds],
-    );
-    result.map_err(|_| LendingError::TokenMintToFailed.into())
+    )
 }
 
 /// Issue a spl_token `Burn` instruction.
@@ -111,7 +108,7 @@ fn spl_token_burn<'a, 'b>(
     authority_signer_seeds: &'b [&'b [u8]],
     token_program: AccountInfo<'a>,
 ) -> ProgramResult {
-    let result = invoke_signed(
+    invoke_signed(
         &spl_token::instruction::burn(
             token_program.key,
             source.key,
@@ -122,6 +119,5 @@ fn spl_token_burn<'a, 'b>(
         )?,
         &[source, mint, authority, token_program],
         &[authority_signer_seeds],
-    );
-    result.map_err(|_| LendingError::TokenBurnFailed.into())
+    )
 }

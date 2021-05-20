@@ -10,6 +10,7 @@ no-entrypoint = []
 
 [dependencies]
 arrayref = "0.3"
+borsh = "0.9"
 fehler = "1"
 num-derive = "0.3"
 num-traits = "0.2"

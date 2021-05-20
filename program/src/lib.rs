@@ -4,6 +4,7 @@
 pub mod error;
 pub mod instruction;
 mod spl_helper;
+mod state;
 // pub mod native_mint;
 pub mod processor;
 // pub mod state;
