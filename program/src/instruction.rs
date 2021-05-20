@@ -21,40 +21,25 @@ pub const MAX_SIGNERS: usize = 11;
 pub enum TakerInstruction {
     /// Accounts expected by this instruction:
     ///
-    ///   0. `[]` The SPL-Token Program Account.
-    ///   1. `[]` The user wallet account.
-    ///   2. `[writable]` The user token account.
-    ///   3. `[writable]` The taker token account.
+    ///   1. `[signer]` The user authority account.
+    ///   2. `[writable]` The user's NFT Token Account.
+    ///   3. `[writable]` The Taker's NFT Token Account.
+    ///   4. `[writable]` The Taker's TKR Token Account.
+    ///   5. `[writable]` The user's TKR Token Account.
     ///
     DepositNFT { token_id: Pubkey },
 }
 
-pub fn deposit_nft(token_id: Pubkey, nft_holder_keypair: Pubkey) -> Self {
-    Instruction::new_with_bytes(
-        crate::id(),
-        &TakerInstruction::DepositNFT { token_id }.pack(),
-        vec![
-            AccountMeta::new(nft_holder_keypair.pubkey(), true),
-            AccountMeta::new(
-                get_associated_token_address(&nft_holder_keypair.pubkey(), &opt.nft_mint_address),
-                false,
-            ),
-            AccountMeta::new(
-                get_associated_token_address(&taker_owner_keypair.pubkey(), &opt.nft_mint_address),
-                false,
-            ),
-            AccountMeta::new(spl_token::id(), false),
-        ],
-    );
-}
-
+// TODO: add tests for pack and unpack
+// pack and unpack the instruction from their binary representation
 impl TakerInstruction {
     #[throws(ProgramError)]
     pub fn unpack(input: &[u8]) -> Self {
         let (&tag, rest) = input.split_first().ok_or(InvalidInstruction)?;
 
         match tag {
-            0 => Self::DepositNFT {
+            0 => Self::Initialize,
+            1 => Self::DepositNFT {
                 token_id: unpack_pubkey(rest)?.0,
             },
             _ => throw!(InvalidInstruction),
@@ -64,8 +49,11 @@ impl TakerInstruction {
     pub fn pack(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(size_of::<Self>());
         match self {
-            Self::DepositNFT { token_id } => {
+            Self::Initialize => {
                 buf.push(0);
+            }
+            Self::DepositNFT { token_id } => {
+                buf.push(1);
                 buf.extend_from_slice(token_id.as_ref());
             }
         };

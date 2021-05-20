@@ -1,5 +1,7 @@
 //! Program state processor
 
+mod initialize;
+
 use crate::{error::TakerError, instruction::TakerInstruction};
 use fehler::throws;
 use solana_program::{
@@ -78,6 +80,7 @@ fn process_deposit(program_id: &Pubkey, token_id: &Pubkey, accounts: &[AccountIn
         ],
     )?;
 
+    // Call the SPL-Token program to transfer the TKR to the Holder
     invoke(
         &spl_token::instruction::transfer(
             &spl_token::id(),

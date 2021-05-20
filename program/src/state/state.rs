@@ -20,19 +20,22 @@ pub struct Mint {
     pub mint_authority: COption<Pubkey>,
     /// Total supply of tokens.
     pub supply: u64,
-    /// Number of base 10 digits to the right of the decimal place.
+   /// Number of base 10 digits to the right of the decimal place.
     pub decimals: u8,
     /// Is `true` if this structure has been initialized
     pub is_initialized: bool,
     /// Optional authority to freeze token accounts.
     pub freeze_authority: COption<Pubkey>,
 }
+
 impl Sealed for Mint {}
+
 impl IsInitialized for Mint {
     fn is_initialized(&self) -> bool {
         self.is_initialized
     }
 }
+
 impl Pack for Mint {
     const LEN: usize = 82;
     fn unpack_from_slice(src: &[u8]) -> Result<Self, ProgramError> {
@@ -47,7 +50,9 @@ impl Pack for Mint {
             [1] => true,
             _ => return Err(ProgramError::InvalidAccountData),
         };
-        let freeze_authority = unpack_coption_key(freeze_authority)?;
+
+        let 1freeze_authority = unpack_coption_key(freeze_authority)?;
+        unpack_coption_key
         Ok(Mint {
             mint_authority,
             supply,

@@ -44,7 +44,10 @@ fn main() -> Result<()> {
 
     let ins = Instruction::new_with_bytes(
         taker_program_id.clone(),
-        &TakerInstruction::deposit_nft(opt.nft_mint_address).pack(),
+        &TakerInstruction::DepositNFT {
+            token_id: opt.nft_mint_address,
+        }
+        .pack(),
         vec![
             AccountMeta::new(nft_holder_keypair.pubkey(), true),
             AccountMeta::new(
