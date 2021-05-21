@@ -2,11 +2,10 @@
 #![allow(unused_imports, unused_variables, dead_code)]
 
 use anchor_lang::prelude::*;
-use anchor_spl::dex;
-use anchor_spl::dex::serum_dex::instruction::SelfTradeBehavior;
-use anchor_spl::dex::serum_dex::matching::{OrderType, Side as SerumSide};
-use anchor_spl::dex::serum_dex::state::MarketState;
 use anchor_spl::token;
+use fehler::throw;
+use solana_program::pubkey::Pubkey;
+use std::collections::HashMap;
 
 // pub mod error;
 // pub mod instruction;
@@ -22,38 +21,77 @@ use anchor_spl::token;
 // Export current sdk types for downstream users building with a different sdk version
 // pub use solana_program;
 
-solana_program::declare_id!("4cpqXnc2LAMmwB9wwmRtCZtsx3H2pQXYTKVhhRhJHQiy");
-
 #[program]
 pub mod taker {
     use super::*;
 
-    pub fn initialize(ctx: Context<Initialize>, data: u64) -> ProgramResult {
-        let my_account = &mut ctx.accounts.my_account;
-        my_account.data = data;
-        Ok(())
+    #[state]
+    pub struct TakerContract {
+        pub authority: Pubkey,
+        pub tkr_mint: Pubkey,
+        pub tai_mint: Pubkey,
+        pub dai_mint: Pubkey,
+        pub nft_ownership: HashMap<Pubkey, Pubkey>,
+        pub nft_price_at_loan: HashMap<Pubkey, u64>,
+        pub deposit_incentive: u64,
+        pub max_loan_duration: u64,
+        pub service_fee_rate: u64,
+        pub interest_rate: u64,
+        // Total number of loans generated
+        pub total_num_loans: u64,
     }
 
-    pub fn update(ctx: Context<Update>, data: u64) -> ProgramResult {
-        let my_account = &mut ctx.accounts.my_account;
-        my_account.data = data;
-        Ok(())
+    impl TakerContract {
+        pub fn new(ctx: Context<New>) -> Result<Self> {
+            Ok(Self {
+                authority: *ctx.accounts.authority.key,
+                tkr_mint: *ctx.accounts.tkr_mint.key,
+                tai_mint: *ctx.accounts.tai_mint.key,
+                dai_mint: *ctx.accounts.dai_mint.key,
+
+                nft_ownership: HashMap::new(),
+                nft_price_at_loan: HashMap::new(),
+                deposit_incentive: 100,
+                max_loan_duration: 30,
+                // 5%
+                service_fee_rate: 500,
+                // 1%
+                interest_rate: 100,
+                total_num_loans: 0,
+            })
+        }
+
+        pub fn update_tkr_mint(&mut self, ctx: Context<UpdateTkrMint>) -> Result<()> {
+            if ctx.accounts.authority.key != &self.authority {
+                throw!(TakerError::NotAuhorized)
+            }
+            self.tkr_mint = *ctx.accounts.mint.key;
+            Ok(())
+        }
+
+        pub fn deposit_nft(&mut self) {}
     }
 }
+
 #[derive(Accounts)]
-pub struct Initialize<'info> {
-    #[account(init)]
-    pub my_account: ProgramAccount<'info, TakerContractAccount>,
+pub struct New<'info> {
+    #[account(signer)]
+    pub authority: AccountInfo<'info>,
+    pub tkr_mint: AccountInfo<'info>,
+    pub tai_mint: AccountInfo<'info>,
+    pub dai_mint: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
-pub struct Update<'info> {
-    #[account(mut)]
-    pub my_account: ProgramAccount<'info, TakerContractAccount>,
+pub struct UpdateTkrMint<'info> {
+    #[account(signer)]
+    pub authority: AccountInfo<'info>,
+    pub mint: AccountInfo<'info>,
 }
 
-#[account]
-pub struct TakerContractAccount {
-    pub data: u64,
+#[error]
+pub enum TakerError {
+    #[msg("Not Authorized")]
+    NotAuhorized,
 }
