@@ -22,114 +22,142 @@ use std::collections::HashMap;
 // Export current sdk types for downstream users building with a different sdk version
 // pub use solana_program;
 
+// The contract account should have address find_program_address(&[seed], program_id)
+#[account]
+pub struct TakerContract {
+    pub seed: Vec<u8>,
+    pub bump_seed: u8, // store the bump seed so we don't need to call find_program_address every time.
+    pub authority: Pubkey,
+    pub tkr_mint: Pubkey,
+    pub tai_mint: Pubkey,
+    pub dai_mint: Pubkey,
+    pub deposit_incentive: u64,
+    pub max_loan_duration: u64,
+    pub service_fee_rate: u64,
+    pub interest_rate: u64,
+    // Total number of loans generated
+    pub total_num_loans: u64,
+}
+
 #[program]
 pub mod taker {
     use super::*;
 
-    #[state]
-    pub struct TakerContract {
-        pub authority: Pubkey,
-        pub tkr_mint: Pubkey,
-        pub tai_mint: Pubkey,
-        pub dai_mint: Pubkey,
-        pub nft_ownership: HashMap<Pubkey, Pubkey>,
-        pub nft_price_at_loan: HashMap<Pubkey, u64>,
-        pub deposit_incentive: u64,
-        pub max_loan_duration: u64,
-        pub service_fee_rate: u64,
-        pub interest_rate: u64,
-        // Total number of loans generated
-        pub total_num_loans: u64,
+    pub fn initialize(ctx: Context<Initialize>, seed: [u8; 32]) -> Result<()> {
+        let (_, bump_seed) = Pubkey::find_program_address(&[&seed[..]], ctx.program_id);
+
+        let contract = &mut ctx.accounts.contract_account;
+
+        // Create accounts for this contract on tkr, tai and dai
+        anchor_spl::token::initialize_account(CpiContext::new(
+            ctx.accounts.spl_program.clone(),
+            anchor_spl::token::InitializeAccount {
+                account: ctx.accounts.tai_token.to_account_info(),
+                mint: ctx.accounts.tai_mint.clone(),
+                authority: ctx.accounts.authority.clone(),
+            },
+        ))?;
+        anchor_spl::token::initialize_account(CpiContext::new(
+            ctx.accounts.spl_program.clone(),
+            anchor_spl::token::InitializeAccount {
+                account: ctx.accounts.tkr_token.to_account_info(),
+                mint: ctx.accounts.tkr_mint.clone(),
+                authority: ctx.accounts.authority.clone(),
+            },
+        ))?;
+        anchor_spl::token::initialize_account(CpiContext::new(
+            ctx.accounts.spl_program.clone(),
+            anchor_spl::token::InitializeAccount {
+                account: ctx.accounts.dai_token.to_account_info(),
+                mint: ctx.accounts.dai_mint.clone(),
+                authority: ctx.accounts.authority.clone(),
+            },
+        ))?;
+
+        contract.authority = *ctx.accounts.authority.key;
+        contract.seed = seed.to_vec();
+        contract.bump_seed = bump_seed;
+        contract.tkr_mint = *ctx.accounts.tkr_mint.key;
+        contract.tai_mint = *ctx.accounts.tai_mint.key;
+        contract.dai_mint = *ctx.accounts.dai_mint.key;
+
+        contract.deposit_incentive = 100;
+        contract.max_loan_duration = 30;
+
+        // 5%
+        contract.service_fee_rate = 500;
+        // 1%
+        contract.interest_rate = 100;
+        contract.total_num_loans = 0;
+
+        Ok(())
     }
 
-    impl TakerContract {
-        pub fn new(ctx: Context<New>) -> Result<Self> {
-            Ok(Self {
-                authority: *ctx.accounts.authority.key,
-                tkr_mint: *ctx.accounts.tkr_mint.key,
-                tai_mint: *ctx.accounts.tai_mint.key,
-                dai_mint: *ctx.accounts.dai_mint.key,
+    pub fn deposit_nft(ctx: Context<DepositNFT>) -> Result<()> {
+        let accounts = ctx.accounts;
+        let contract = &mut accounts.contract_account;
+        assert!(accounts.tkr_src.mint == contract.tkr_mint);
 
-                nft_ownership: HashMap::new(),
-                nft_price_at_loan: HashMap::new(),
-                deposit_incentive: 100,
-                max_loan_duration: 30,
-                // 5%
-                service_fee_rate: 500,
-                // 1%
-                interest_rate: 100,
-                total_num_loans: 0,
-            })
-        }
+        anchor_spl::token::transfer(
+            CpiContext::new(
+                accounts.spl_program.clone(),
+                anchor_spl::token::Transfer {
+                    from: accounts.nft_src.to_account_info(),
+                    to: accounts.nft_dst.to_account_info(),
+                    authority: accounts.user_authority.clone(),
+                },
+            ),
+            1,
+        )?;
 
-        pub fn update_tkr_mint(&mut self, ctx: Context<UpdateTkrMint>) -> Result<()> {
-            if ctx.accounts.authority.key != &self.authority {
-                throw!(TakerError::NotAuhorized)
-            }
-            self.tkr_mint = *ctx.accounts.mint.key;
-            Ok(())
-        }
+        anchor_spl::token::transfer(
+            CpiContext::new_with_signer(
+                accounts.spl_program.clone(),
+                anchor_spl::token::Transfer {
+                    from: accounts.tkr_src.to_account_info(),
+                    to: accounts.tkr_dst.to_account_info(),
+                    authority: contract.to_account_info(),
+                },
+                &[&[&contract.authority.to_bytes()[..], &[contract.bump_seed]]],
+            ),
+            contract.deposit_incentive,
+        )?;
 
-        pub fn deposit_nft(&mut self, ctx: Context<DepositNFT>) -> Result<()> {
-            let accounts = ctx.accounts;
-            assert!(accounts.tkr_src.mint == self.tkr_mint);
-
-            anchor_spl::token::transfer(
-                CpiContext::new(
-                    accounts.spl_program.clone(),
-                    anchor_spl::token::Transfer {
-                        from: accounts.nft_src.to_account_info(),
-                        to: accounts.nft_dst.to_account_info(),
-                        authority: accounts.user_authority.clone(),
-                    },
-                ),
-                1,
-            )?;
-
-            anchor_spl::token::transfer(
-                CpiContext::new_with_signer(
-                    accounts.spl_program.clone(),
-                    anchor_spl::token::Transfer {
-                        from: accounts.tkr_src.to_account_info(),
-                        to: accounts.tkr_dst.to_account_info(),
-                        authority: accounts.taker_authority.clone(),
-                    },
-                    &[],
-                ),
-                self.deposit_incentive,
-            )?;
-
-            Ok(())
-        }
+        // contract
+        //     .nft_ownership
+        //     .insert(*accounts.nft_mint.key, *accounts.user_authority.key);
+        Ok(())
     }
 }
 
 #[derive(Accounts)]
-pub struct New<'info> {
+pub struct Initialize<'info> {
+    #[account(init)]
+    pub contract_account: ProgramAccount<'info, TakerContract>,
+
     #[account(signer)]
-    pub authority: AccountInfo<'info>,
+    pub authority: AccountInfo<'info>, // also the funder
     pub tkr_mint: AccountInfo<'info>,
+    pub tkr_token: CpiAccount<'info, TokenAccount>,
     pub tai_mint: AccountInfo<'info>,
+    pub tai_token: CpiAccount<'info, TokenAccount>,
     pub dai_mint: AccountInfo<'info>,
+    pub dai_token: CpiAccount<'info, TokenAccount>,
+    pub spl_program: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
-pub struct UpdateTkrMint<'info> {
-    #[account(signer)]
-    pub authority: AccountInfo<'info>,
-    pub mint: AccountInfo<'info>,
-}
-
-#[derive(Accounts)]
 pub struct DepositNFT<'info> {
+    #[account(mut)]
+    pub contract_account: ProgramAccount<'info, TakerContract>,
+
     #[account(signer)]
     pub user_authority: AccountInfo<'info>,
     pub nft_mint: AccountInfo<'info>,
     pub nft_src: CpiAccount<'info, TokenAccount>,
     pub nft_dst: CpiAccount<'info, TokenAccount>,
 
-    pub taker_authority: AccountInfo<'info>,
     pub tkr_src: CpiAccount<'info, TokenAccount>,
     pub tkr_dst: CpiAccount<'info, TokenAccount>,
     pub spl_program: AccountInfo<'info>,
@@ -140,3 +168,6 @@ pub enum TakerError {
     #[msg("Not Authorized")]
     NotAuhorized,
 }
+
+#[event]
+pub struct CalledInitialize {}

@@ -10,3 +10,6 @@ deploy: build
 
 token +ARGS="":
   spl-token {{ARGS}}
+
+test:
+  anchor test --skip-deploy
