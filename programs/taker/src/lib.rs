@@ -3,6 +3,7 @@
 
 use anchor_lang::prelude::*;
 use anchor_spl::token;
+use anchor_spl::token::TokenAccount;
 use fehler::throw;
 use solana_program::pubkey::Pubkey;
 use std::collections::HashMap;
@@ -69,7 +70,37 @@ pub mod taker {
             Ok(())
         }
 
-        pub fn deposit_nft(&mut self) {}
+        pub fn deposit_nft(&mut self, ctx: Context<DepositNFT>) -> Result<()> {
+            let accounts = ctx.accounts;
+            assert!(accounts.tkr_src.mint == self.tkr_mint);
+
+            anchor_spl::token::transfer(
+                CpiContext::new(
+                    accounts.spl_program.clone(),
+                    anchor_spl::token::Transfer {
+                        from: accounts.nft_src.to_account_info(),
+                        to: accounts.nft_dst.to_account_info(),
+                        authority: accounts.user_authority.clone(),
+                    },
+                ),
+                1,
+            )?;
+
+            anchor_spl::token::transfer(
+                CpiContext::new_with_signer(
+                    accounts.spl_program.clone(),
+                    anchor_spl::token::Transfer {
+                        from: accounts.tkr_src.to_account_info(),
+                        to: accounts.tkr_dst.to_account_info(),
+                        authority: accounts.taker_authority.clone(),
+                    },
+                    &[],
+                ),
+                self.deposit_incentive,
+            )?;
+
+            Ok(())
+        }
     }
 }
 
@@ -88,6 +119,20 @@ pub struct UpdateTkrMint<'info> {
     #[account(signer)]
     pub authority: AccountInfo<'info>,
     pub mint: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct DepositNFT<'info> {
+    #[account(signer)]
+    pub user_authority: AccountInfo<'info>,
+    pub nft_mint: AccountInfo<'info>,
+    pub nft_src: CpiAccount<'info, TokenAccount>,
+    pub nft_dst: CpiAccount<'info, TokenAccount>,
+
+    pub taker_authority: AccountInfo<'info>,
+    pub tkr_src: CpiAccount<'info, TokenAccount>,
+    pub tkr_dst: CpiAccount<'info, TokenAccount>,
+    pub spl_program: AccountInfo<'info>,
 }
 
 #[error]

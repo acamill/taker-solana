@@ -10,16 +10,21 @@ anchor.setProvider(anchor.Provider.local());
 async function main() {
     // #region main
     // Read the generated IDL.
-    const idl = JSON.parse(require('fs').readFileSync('./target/idl/basic_0.json', 'utf8'));
+    const idl = JSON.parse(require('fs').readFileSync('./target/idl/taker.json', 'utf8'));
 
     // Address of the deployed program.
-    const programId = new anchor.web3.PublicKey('<YOUR-PROGRAM-ID>');
+    const programId = new anchor.web3.PublicKey('91aE2UGTmGfy9FVCPB9PFoNbEokDoPBKh8nitW4QPwxp');
 
     // Generate the program client from IDL.
     const program = new anchor.Program(idl, programId);
 
     // Execute the RPC.
-    await program.rpc.initialize();
+    // await program.rpc.initialize();
+    await program.state.rpc.new({
+        accounts: {
+            authority: provider.wallet.publicKey,
+        },
+    });
     // #endregion main
 }
 
