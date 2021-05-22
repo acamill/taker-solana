@@ -1,5 +1,24 @@
 const anchor = require('@project-serum/anchor');
+const solanaWeb3 = require('@solana/web3.js');
+const splToken = require('@solana/spl-token');
 const bs58 = require('bs58');
+
+const SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID = new anchor.web3.PublicKey(
+  'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
+);
+async function findAssociatedTokenAddress(
+  walletAddress,
+  tokenMintAddress
+) {
+  return (await solanaWeb3.PublicKey.findProgramAddress(
+    [
+      walletAddress.toBuffer(),
+      splToken.TOKEN_PROGRAM_ID.toBuffer(),
+      tokenMintAddress.toBuffer(),
+    ],
+    SPL_ASSOCIATED_TOKEN_ACCOUNT_PROGRAM_ID
+  ))[0];
+}
 
 describe('taker-solana', () => {
 
@@ -23,7 +42,7 @@ describe('taker-solana', () => {
     const tai_mint = new anchor.web3.PublicKey(process.env.TAI_MINT_ADDRESS);
     const dai_mint = new anchor.web3.PublicKey(process.env.DAI_MINT_ADDRESS);
 
-    console.log(tkr_mint);
+
     const tx = await program.rpc.initialize(
       seed.publicKey.toBuffer(),
       {
@@ -31,12 +50,12 @@ describe('taker-solana', () => {
           contractAccount: contract_acc,
           authority: authority.publicKey,
           tkrMint: tkr_mint,
-          //  tkr_token: CpiAccount< 'info, TokenAccount>,
+          tkrToken: await findAssociatedTokenAddress(contract_acc, tkr_mint),
           taiMint: tai_mint,
-          //  tai_token: CpiAccount< 'info, TokenAccount>,
+          taiToken: await findAssociatedTokenAddress(contract_acc, tai_mint),
           daiMint: dai_mint,
-          //  dai_token: CpiAccount< 'info, TokenAccount>,
-          //  spl_program: AccountInfo< 'info>,
+          daiToken: await findAssociatedTokenAddress(contract_acc, dai_mint),
+          splProgram: splToken.TOKEN_PROGRAM_ID,
           rent: anchor.web3.SYSVAR_RENT_PUBKEY,
         }
       });

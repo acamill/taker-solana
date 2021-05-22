@@ -14,13 +14,16 @@ struct Opt {
 
     #[structopt(long, env, default_value = "wss://devnet.solana.com")]
     solana_sub_url: String,
+
+    #[structopt(long, short = "a", env)]
+    taker_program_addr: String,
 }
 
 fn main() -> Result<()> {
     let opt = Opt::from_args();
     let _ = env_logger::init();
 
-    let program_id = taker::id();
+    let program_id = opt.taker_program_addr;
     info!("Listening to {}", program_id);
     loop {
         match imp(&opt.solana_sub_url, &program_id.to_string()) {

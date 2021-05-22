@@ -44,6 +44,8 @@ pub mod taker {
     use super::*;
 
     pub fn initialize(ctx: Context<Initialize>, seed: [u8; 32]) -> Result<()> {
+        emit!(CalledInitialize {});
+
         let (_, bump_seed) = Pubkey::find_program_address(&[&seed[..]], ctx.program_id);
 
         let contract = &mut ctx.accounts.contract_account;

@@ -2,14 +2,16 @@ cli prog +ARGS="":
   cd cli && cargo run --bin {{prog}} -- {{ARGS}}
 
 build:
-  cd program && cargo build-bpf && anchor idl parse -f src/lib.rs -o target/idl/basic_0.json
+  anchor build
   
-
 deploy: build
-  cd program && solana program deploy target/deploy/taker.so 
+  anchor deploy
 
 token +ARGS="":
   spl-token {{ARGS}}
 
 test:
   anchor test --skip-deploy
+
+transact:
+  node scripts/transact.js
