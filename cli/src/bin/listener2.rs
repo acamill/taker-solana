@@ -1,30 +1,27 @@
-use anchor_client::Client;
-use anchor_client::Cluster;
+use anchor_client::{Client, Cluster};
 use anyhow::Result;
-use cli::Keypair;
-use solana_sdk::pubkey::Pubkey;
+use rand::rngs::OsRng;
+use solana_sdk::{pubkey::Pubkey, signature::Keypair};
 use std::thread::sleep;
 use std::time::Duration;
 use structopt::StructOpt;
-use taker::EventItWorks;
+use taker::{EventCalledInitialize, EventContractCreated};
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "listener", about = "Making transactions to the Taker Protocol")]
 struct Opt {
-    #[structopt(long, env)]
-    taker_authority_keypair: Keypair,
-
     #[structopt(long, env, short = "p")]
     taker_program_address: Pubkey,
 }
 
 fn main() -> Result<()> {
     let opt = Opt::from_args();
+    let acc = Keypair::generate(&mut OsRng);
 
-    let client = Client::new(Cluster::Devnet, opt.taker_authority_keypair.0);
+    let client = Client::new(Cluster::Devnet, acc);
     let program = client.program(opt.taker_program_address);
 
-    let _handle = program.on(|_, e: EventItWorks| {
+    let _handle = program.on(|_, e: EventContractCreated| {
         println!("{:?}", e);
     })?;
 

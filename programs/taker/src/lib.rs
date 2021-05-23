@@ -47,10 +47,23 @@ pub mod taker {
 
     use super::*;
 
-    pub fn it_works(ctx: Context<AccountsItWorks>) -> Result<()> {
-        msg!("yes");
-        emit!(EventItWorks {
-            msg: "Yes, it works.".to_string()
+    // create the account for the contract account
+    pub fn allocate(ctx: Context<AccountsAllocate>, seed: [u8; 32]) -> Result<()> {
+        let accounts = &ctx.accounts;
+
+        utils::create_rent_exempt_account(
+            ctx.program_id, // The program ID of Taker Contract
+            &accounts.authority,
+            &accounts.contract,
+            &seed,
+            ctx.program_id,
+            10240,
+            &accounts.rent,
+            &accounts.system,
+        )?;
+
+        emit!(EventContractCreated {
+            addr: *accounts.contract.to_account_info().key,
         });
 
         Ok(())
@@ -64,16 +77,6 @@ pub mod taker {
         let accounts = &mut ctx.accounts;
         let contract = &mut accounts.contract_account;
         let contract_key = contract.to_account_info().key;
-
-        // // create the account for the contract account
-        // utils::create_rent_exempt_account(
-        //     *ctx.program_id,
-        //     contract.to_account_info(),
-        //     accounts.authority.clone(),
-        //     1024 * 1024 * 9,
-        //     accounts.rent.to_account_info(),
-        //     accounts.system.clone(),
-        // )?;
 
         // // Create accounts for this contract on tkr, tai and dai
         // utils::create_associated_token_account(
@@ -110,9 +113,9 @@ pub mod taker {
         contract.authority = *accounts.authority.key;
         contract.seed = seed.to_vec();
         contract.bump_seed = bump_seed;
-        contract.tkr_mint = *accounts.tkr_mint.key;
-        contract.tai_mint = *accounts.tai_mint.key;
-        contract.dai_mint = *accounts.dai_mint.key;
+        // contract.tkr_mint = *accounts.tkr_mint.key;
+        // contract.tai_mint = *accounts.tai_mint.key;
+        // contract.dai_mint = *accounts.dai_mint.key;
 
         contract.deposit_incentive = 100;
         contract.max_loan_duration = 30;
@@ -164,9 +167,12 @@ pub mod taker {
 }
 
 #[derive(Accounts)]
-pub struct AccountsItWorks<'info> {
-    #[account(init)]
-    pub contract_account: ProgramAccount<'info, TakerContract>,
+pub struct AccountsAllocate<'info> {
+    #[account(mut)]
+    pub contract: AccountInfo<'info>,
+    #[account(signer)]
+    pub authority: AccountInfo<'info>, // also the funder
+    pub system: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
 }
 
@@ -177,14 +183,14 @@ pub struct AccountsInitialize<'info> {
 
     #[account(signer)]
     pub authority: AccountInfo<'info>, // also the funder
-    pub tkr_mint: AccountInfo<'info>,
-    pub tkr_token: CpiAccount<'info, TokenAccount>,
-    pub tai_mint: AccountInfo<'info>,
-    pub tai_token: CpiAccount<'info, TokenAccount>,
-    pub dai_mint: AccountInfo<'info>,
-    pub dai_token: CpiAccount<'info, TokenAccount>,
-    pub spl_program: AccountInfo<'info>,
-    pub system: AccountInfo<'info>,
+    // pub tkr_mint: AccountInfo<'info>,
+    // pub tkr_token: CpiAccount<'info, TokenAccount>,
+    // pub tai_mint: AccountInfo<'info>,
+    // pub tai_token: CpiAccount<'info, TokenAccount>,
+    // pub dai_mint: AccountInfo<'info>,
+    // pub dai_token: CpiAccount<'info, TokenAccount>,
+    // pub spl_program: AccountInfo<'info>,
+    // pub system: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
 }
 
@@ -211,16 +217,11 @@ pub enum TakerError {
 }
 
 #[event]
+#[derive(Debug)]
 pub struct EventCalledInitialize {}
 
 #[event]
 #[derive(Debug)]
-pub struct EventItWorks {
-    msg: String,
-}
-
-#[event]
-pub struct EventCreateAccount {
+pub struct EventContractCreated {
     addr: Pubkey,
-    lamport: u64,
 }

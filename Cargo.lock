@@ -566,6 +566,7 @@ dependencies = [
  "rand 0.7.3",
  "serde",
  "solana-client",
+ "solana-logger",
  "solana-sdk",
  "spl-associated-token-account",
  "spl-token",

@@ -1,36 +1,34 @@
-use crate::EventCreateAccount;
 use anchor_lang::prelude::*;
 use fehler::throws;
-use solana_program::instruction::Instruction;
+use solana_program::{instruction::Instruction, program::invoke_signed};
 use solana_program::{program::invoke, system_instruction};
 
 #[throws(ProgramError)]
 pub fn create_rent_exempt_account<'info>(
-    owner: Pubkey,
-    account: AccountInfo<'info>,
-    funder: AccountInfo<'info>,
+    program_id: &Pubkey, // The program ID of Taker Contract
+    funder: &AccountInfo<'info>,
+    account: &AccountInfo<'info>,
+    seed: &[u8],
+    owner: &Pubkey,
     acc_size: u64,
-    rent: AccountInfo<'info>,
-    system: AccountInfo<'info>,
+    rent: &Sysvar<'info, Rent>,
+    system: &AccountInfo<'info>,
 ) {
-    let rent = &Rent::from_account_info(&rent)?;
+    let (addr, bump_seed) = Pubkey::find_program_address(&[seed], program_id);
+    assert_eq!(&addr, account.key);
 
     let required_lamports = rent.minimum_balance(acc_size as usize).max(1);
 
-    emit!(EventCreateAccount {
-        addr: *account.key,
-        lamport: required_lamports
-    });
-
-    invoke(
+    invoke_signed(
         &system_instruction::create_account(
             funder.key,
             account.key,
             required_lamports,
             acc_size,
-            &owner,
+            program_id,
         ),
-        &[funder, account, system],
+        &[funder.clone(), account.clone(), system.clone()],
+        &[&[&seed[..], &[bump_seed]]],
     )?;
 }
 
