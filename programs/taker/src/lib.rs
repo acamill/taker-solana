@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 #![allow(unused_imports, unused_variables, dead_code)]
 
+mod impls;
 mod utils;
 
 use anchor_lang::prelude::*;
@@ -10,25 +11,11 @@ use fehler::throw;
 use solana_program::pubkey::Pubkey;
 use std::collections::HashMap;
 
-// pub mod error;
-// pub mod instruction;
-// mod spl_helper;
-// mod state;
-// pub mod native_mint;
-// pub mod processor;
-// pub mod state;
-
-// #[cfg(not(feature = "no-entrypoint"))]
-// mod entrypoint;
-
-// Export current sdk types for downstream users building with a different sdk version
-// pub use solana_program;
-
 // The contract account should have address find_program_address(&[seed], program_id)
 #[account]
 pub struct TakerContract {
     pub seed: Vec<u8>,
-    pub bump_seed: u8, // store the bump seed so we don't need to call find_program_address every time.
+    pub bump_seed: u8,
     pub authority: Pubkey,
     pub tkr_mint: Pubkey,
     pub tai_mint: Pubkey,
@@ -47,107 +34,48 @@ pub mod taker {
 
     use super::*;
 
-    // create the account for the contract account
-    pub fn allocate(ctx: Context<AccountsAllocate>, seed: [u8; 32], bump: u8) -> Result<()> {
+    pub fn initialize(ctx: Context<AccountsInitialize>, seed: [u8; 32], bump: u8) -> Result<()> {
         let seeds_with_bump = &[&seed[..], &[bump]];
 
         let accounts = &ctx.accounts;
-        let contract = &accounts.contract;
-        let contract_key = contract.to_account_info().key;
 
-        utils::verify_contract_address(&ctx.program_id, seeds_with_bump, contract_key)?;
+        utils::verify_contract_address(&ctx.program_id, seeds_with_bump, &accounts.this.key)?;
 
-        // allocate the space for the contract account
-        utils::create_rent_exempt_account(
-            ctx.program_id, // The program ID of Taker Contract
-            &accounts.authority,
-            &contract.to_account_info(),
-            &[&seed[..], &[bump]],
-            ctx.program_id,
-            10240,
-            &accounts.rent,
-            &accounts.system,
-        )?;
+        let this = TakerContract::new(&ctx, &seed[..], bump)?;
 
         emit!(EventContractAllocated {
-            addr: *contract_key
+            addr: *this.to_account_info().key
         });
 
-        Ok(())
-    }
-
-    pub fn initialize(
-        mut ctx: Context<AccountsInitialize>,
-        seed: [u8; 32],
-        bump: u8,
-    ) -> Result<()> {
-        let seeds_with_bump = &[&seed[..], &[bump]];
-
-        let accounts = &mut ctx.accounts;
-        let contract = &mut accounts.contract;
-        let contract_key = contract.to_account_info().key;
-
-        utils::verify_contract_address(&ctx.program_id, seeds_with_bump, contract_key)?;
-
         // Create accounts for this contract on tkr, tai and dai
-        utils::create_associated_token_account(
-            &contract,
-            &accounts.authority,
-            &accounts.tai_mint,
-            &accounts.tai_token,
-            &accounts.ata_program,
-            &accounts.spl_program,
-            &accounts.system,
-            &accounts.rent,
-        )?;
-
-        utils::create_associated_token_account(
-            &contract,
-            &accounts.authority,
-            &accounts.dai_mint,
-            &accounts.dai_token,
-            &accounts.ata_program,
-            &accounts.spl_program,
-            &accounts.system,
-            &accounts.rent,
-        )?;
-
-        utils::create_associated_token_account(
-            &contract,
-            &accounts.authority,
-            &accounts.tkr_mint,
-            &accounts.tkr_token,
-            &accounts.ata_program,
-            &accounts.spl_program,
-            &accounts.system,
-            &accounts.rent,
-        )?;
-
-        // set corresponding fields
-        contract.authority = *accounts.authority.key;
-        contract.seed = seed.to_vec();
-        contract.bump_seed = bump;
-        contract.tkr_mint = *accounts.tkr_mint.key;
-        contract.tai_mint = *accounts.tai_mint.key;
-        contract.dai_mint = *accounts.dai_mint.key;
-
-        contract.deposit_incentive = 100;
-        contract.max_loan_duration = 30;
-
-        // 5%
-        contract.service_fee_rate = 500;
-        // 1%
-        contract.interest_rate = 100;
-        contract.total_num_loans = 0;
+        for (mint, token) in &[
+            (&accounts.dai_mint, &accounts.dai_token),
+            (&accounts.tkr_mint, &accounts.tkr_token),
+            (&accounts.tai_mint, &accounts.tai_token),
+        ] {
+            utils::create_associated_token_account(
+                &this,
+                &accounts.authority,
+                mint,
+                token,
+                &accounts.ata_program,
+                &accounts.spl_program,
+                &accounts.system,
+                &accounts.rent,
+            )?;
+        }
 
         emit!(EventContractInitialized {});
 
         Ok(())
     }
 
+    // The NFT associated account for this contract must be already created
     pub fn deposit_nft(ctx: Context<AccountsDepositNFT>) -> Result<()> {
         let accounts = ctx.accounts;
         let contract = &mut accounts.contract_account;
+        let seeds_with_bump = &[&contract.seed[..], &[contract.bump_seed]];
+
         assert!(accounts.tkr_src.mint == contract.tkr_mint);
 
         anchor_spl::token::transfer(
@@ -170,11 +98,12 @@ pub mod taker {
                     to: accounts.tkr_dst.to_account_info(),
                     authority: contract.to_account_info(),
                 },
-                &[&[&contract.authority.to_bytes()[..], &[contract.bump_seed]]],
+                &[seeds_with_bump],
             ),
             contract.deposit_incentive,
         )?;
 
+        // now
         // contract
         //     .nft_ownership
         //     .insert(*accounts.nft_mint.key, *accounts.user_authority.key);
@@ -183,21 +112,11 @@ pub mod taker {
 }
 
 #[derive(Accounts)]
-pub struct AccountsAllocate<'info> {
-    #[account(mut)]
-    pub contract: AccountInfo<'info>,
-    #[account(signer)]
-    pub authority: AccountInfo<'info>, // also the funder
-    pub system: AccountInfo<'info>,
-    pub rent: Sysvar<'info, Rent>,
-}
-
-#[derive(Accounts)]
 pub struct AccountsInitialize<'info> {
     #[account(signer)]
     pub authority: AccountInfo<'info>, // also the funder
-    #[account(init)]
-    pub contract: ProgramAccount<'info, TakerContract>,
+    #[account(mut)]
+    pub this: AccountInfo<'info>, // We cannot use  ProgramAccount<'info, TakerContract> here because it is not allocated yet
 
     pub tkr_mint: AccountInfo<'info>,
     #[account(mut)]
@@ -210,6 +129,22 @@ pub struct AccountsInitialize<'info> {
     pub dai_mint: AccountInfo<'info>,
     #[account(mut)]
     pub dai_token: AccountInfo<'info>,
+
+    pub ata_program: AccountInfo<'info>,
+    pub spl_program: AccountInfo<'info>,
+    pub system: AccountInfo<'info>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct AccountsInitializeNFTAccount<'info> {
+    #[account(signer)]
+    pub funder: AccountInfo<'info>, // the funder
+    pub contract: ProgramAccount<'info, TakerContract>,
+
+    pub nft_mint: AccountInfo<'info>,
+    #[account(mut)]
+    pub nft_token: AccountInfo<'info>,
 
     pub ata_program: AccountInfo<'info>,
     pub spl_program: AccountInfo<'info>,

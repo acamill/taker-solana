@@ -5,7 +5,7 @@ use solana_sdk::{pubkey::Pubkey, signature::Keypair};
 use std::thread::sleep;
 use std::time::Duration;
 use structopt::StructOpt;
-use taker::{EventContractAllocated, EventContractInitialized};
+use taker::EventContractAllocated;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "listener", about = "Making transactions to the Taker Protocol")]

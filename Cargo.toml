@@ -3,3 +3,5 @@ members = [
   "programs/*",
   "cli",
 ]
+
+exclude = ["programs/taker_nft_listing"]
