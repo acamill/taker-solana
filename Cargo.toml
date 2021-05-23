@@ -1,6 +1,5 @@
 [workspace]
 members = [
   "programs/*",
+  "cli",
 ]
-
-exclude = ["cli"]

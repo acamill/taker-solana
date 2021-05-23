@@ -1,43 +1,34 @@
 use anchor_client::Client;
 use anchor_client::Cluster;
 use anyhow::Result;
-use solana_sdk::instruction::Instruction;
+use cli::Keypair;
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::transaction::Transaction;
-use solana_sdk::{instruction::AccountMeta, signature::Signer};
-use spl_associated_token_account::get_associated_token_address;
-use std::str::FromStr;
+use std::thread::sleep;
+use std::time::Duration;
 use structopt::StructOpt;
-use taker::instruction::TakerInstruction;
-
-pub struct Keypair(pub solana_sdk::signature::Keypair);
-
-impl FromStr for Keypair {
-    fn from_str(s: &str) -> Self {
-        solana_sdk::signature::Keypair::from_base58_string(s);
-    }
-}
+use taker::EventItWorks;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "listener", about = "Making transactions to the Taker Protocol")]
 struct Opt {
     #[structopt(long, env)]
-    taker_owner_keypair: Keypair,
+    taker_authority_keypair: Keypair,
 
-    #[structopt(long, env)]
+    #[structopt(long, env, short = "p")]
     taker_program_address: Pubkey,
 }
 
 fn main() -> Result<()> {
     let opt = Opt::from_args();
 
-    let taker_owner_keypair = &opt.taker_owner_keypair.0;
-    let nft_holder_keypair = &opt.nft_holder_keypair.0;
-
-    let client = Client::new(Cluster::Devnet, *taker_owner_keypair);
+    let client = Client::new(Cluster::Devnet, opt.taker_authority_keypair.0);
     let program = client.program(opt.taker_program_address);
 
-    program.on(|| {});
+    let _handle = program.on(|_, e: EventItWorks| {
+        println!("{:?}", e);
+    })?;
+
+    sleep(Duration::from_secs(1000000));
 
     Ok(())
 }

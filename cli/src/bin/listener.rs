@@ -15,7 +15,7 @@ struct Opt {
     #[structopt(long, env, default_value = "wss://devnet.solana.com")]
     solana_sub_url: String,
 
-    #[structopt(long, short = "a", env)]
+    #[structopt(long, short = "p", env)]
     taker_program_addr: String,
 }
 

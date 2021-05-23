@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 #![allow(unused_imports, unused_variables, dead_code)]
 
+mod utils;
+
 use anchor_lang::prelude::*;
 use anchor_spl::token;
 use anchor_spl::token::TokenAccount;
@@ -41,47 +43,76 @@ pub struct TakerContract {
 
 #[program]
 pub mod taker {
+    use solana_program::{program::invoke_signed, system_instruction};
+
     use super::*;
 
-    pub fn initialize(ctx: Context<Initialize>, seed: [u8; 32]) -> Result<()> {
-        emit!(CalledInitialize {});
+    pub fn it_works(ctx: Context<AccountsItWorks>) -> Result<()> {
+        msg!("yes");
+        emit!(EventItWorks {
+            msg: "Yes, it works.".to_string()
+        });
+
+        Ok(())
+    }
+
+    pub fn initialize(mut ctx: Context<AccountsInitialize>, seed: [u8; 32]) -> Result<()> {
+        emit!(EventCalledInitialize {});
 
         let (_, bump_seed) = Pubkey::find_program_address(&[&seed[..]], ctx.program_id);
 
-        let contract = &mut ctx.accounts.contract_account;
+        let accounts = &mut ctx.accounts;
+        let contract = &mut accounts.contract_account;
+        let contract_key = contract.to_account_info().key;
 
-        // Create accounts for this contract on tkr, tai and dai
-        anchor_spl::token::initialize_account(CpiContext::new(
-            ctx.accounts.spl_program.clone(),
-            anchor_spl::token::InitializeAccount {
-                account: ctx.accounts.tai_token.to_account_info(),
-                mint: ctx.accounts.tai_mint.clone(),
-                authority: ctx.accounts.authority.clone(),
-            },
-        ))?;
-        anchor_spl::token::initialize_account(CpiContext::new(
-            ctx.accounts.spl_program.clone(),
-            anchor_spl::token::InitializeAccount {
-                account: ctx.accounts.tkr_token.to_account_info(),
-                mint: ctx.accounts.tkr_mint.clone(),
-                authority: ctx.accounts.authority.clone(),
-            },
-        ))?;
-        anchor_spl::token::initialize_account(CpiContext::new(
-            ctx.accounts.spl_program.clone(),
-            anchor_spl::token::InitializeAccount {
-                account: ctx.accounts.dai_token.to_account_info(),
-                mint: ctx.accounts.dai_mint.clone(),
-                authority: ctx.accounts.authority.clone(),
-            },
-        ))?;
+        // // create the account for the contract account
+        // utils::create_rent_exempt_account(
+        //     *ctx.program_id,
+        //     contract.to_account_info(),
+        //     accounts.authority.clone(),
+        //     1024 * 1024 * 9,
+        //     accounts.rent.to_account_info(),
+        //     accounts.system.clone(),
+        // )?;
 
-        contract.authority = *ctx.accounts.authority.key;
+        // // Create accounts for this contract on tkr, tai and dai
+        // utils::create_associated_token_account(
+        //     contract.to_account_info(),
+        //     accounts.authority.to_account_info(),
+        //     accounts.tai_mint.clone(),
+        //     accounts.tai_token.to_account_info(),
+        //     accounts.spl_program.clone(),
+        //     accounts.system.clone(),
+        //     accounts.rent.to_account_info(),
+        // )?;
+
+        // utils::create_associated_token_account(
+        //     contract.to_account_info(),
+        //     accounts.authority.to_account_info(),
+        //     accounts.dai_mint.clone(),
+        //     accounts.dai_token.to_account_info(),
+        //     accounts.spl_program.clone(),
+        //     accounts.system.clone(),
+        //     accounts.rent.to_account_info(),
+        // )?;
+
+        // utils::create_associated_token_account(
+        //     contract.to_account_info(),
+        //     accounts.authority.to_account_info(),
+        //     accounts.tkr_mint.clone(),
+        //     accounts.tkr_token.to_account_info(),
+        //     accounts.spl_program.clone(),
+        //     accounts.system.clone(),
+        //     accounts.rent.to_account_info(),
+        // )?;
+
+        // set corresponding fields
+        contract.authority = *accounts.authority.key;
         contract.seed = seed.to_vec();
         contract.bump_seed = bump_seed;
-        contract.tkr_mint = *ctx.accounts.tkr_mint.key;
-        contract.tai_mint = *ctx.accounts.tai_mint.key;
-        contract.dai_mint = *ctx.accounts.dai_mint.key;
+        contract.tkr_mint = *accounts.tkr_mint.key;
+        contract.tai_mint = *accounts.tai_mint.key;
+        contract.dai_mint = *accounts.dai_mint.key;
 
         contract.deposit_incentive = 100;
         contract.max_loan_duration = 30;
@@ -95,7 +126,7 @@ pub mod taker {
         Ok(())
     }
 
-    pub fn deposit_nft(ctx: Context<DepositNFT>) -> Result<()> {
+    pub fn deposit_nft(ctx: Context<AccountsDepositNFT>) -> Result<()> {
         let accounts = ctx.accounts;
         let contract = &mut accounts.contract_account;
         assert!(accounts.tkr_src.mint == contract.tkr_mint);
@@ -133,7 +164,14 @@ pub mod taker {
 }
 
 #[derive(Accounts)]
-pub struct Initialize<'info> {
+pub struct AccountsItWorks<'info> {
+    #[account(init)]
+    pub contract_account: ProgramAccount<'info, TakerContract>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct AccountsInitialize<'info> {
     #[account(init)]
     pub contract_account: ProgramAccount<'info, TakerContract>,
 
@@ -146,11 +184,12 @@ pub struct Initialize<'info> {
     pub dai_mint: AccountInfo<'info>,
     pub dai_token: CpiAccount<'info, TokenAccount>,
     pub spl_program: AccountInfo<'info>,
+    pub system: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
 }
 
 #[derive(Accounts)]
-pub struct DepositNFT<'info> {
+pub struct AccountsDepositNFT<'info> {
     #[account(mut)]
     pub contract_account: ProgramAccount<'info, TakerContract>,
 
@@ -172,4 +211,16 @@ pub enum TakerError {
 }
 
 #[event]
-pub struct CalledInitialize {}
+pub struct EventCalledInitialize {}
+
+#[event]
+#[derive(Debug)]
+pub struct EventItWorks {
+    msg: String,
+}
+
+#[event]
+pub struct EventCreateAccount {
+    addr: Pubkey,
+    lamport: u64,
+}

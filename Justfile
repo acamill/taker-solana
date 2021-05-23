@@ -13,5 +13,12 @@ token +ARGS="":
 test:
   anchor test --skip-deploy
 
-transact:
-  node scripts/transact.js
+b58keypair:
+  #!/usr/bin/env python3
+  import base58
+  import json
+  from pathlib import Path
+
+  with open(Path.home() / ".config/solana/id.json") as f:
+      j = json.load(f)
+  print(base58.b58encode(bytes(j)))

@@ -9,7 +9,9 @@ const bs58 = require('bs58');
 
 
 // Configure the client to use the local cluster.
-anchor.setProvider(anchor.Provider.env());
+const provider = anchor.Provider.env()
+anchor.setProvider(provider);
+
 
 // const idl = JSON.parse(require('fs').readFileSync('./target/idl/taker.json', 'utf8'));
 // const programId = new anchor.web3.PublicKey('91aE2UGTmGfy9FVCPB9PFoNbEokDoPBKh8nitW4QPwxp');
@@ -37,9 +39,8 @@ async function findAssociatedTokenAddress(
 async function main() {
     program.addEventListener("CalledInitialize", (event, slot) => { console.log("Event:", event) });
 
-    let authority = anchor.web3.Keypair.fromSecretKey(
-        bs58.decode(process.env.TAKER_OWNER_KEYPAIR)
-    );
+    let authority = provider.wallet.payer;
+
 
     const seed = await anchor.web3.Keypair.generate();
 
@@ -48,9 +49,11 @@ async function main() {
         program.programId
     );
     const tkr_mint = new anchor.web3.PublicKey(process.env.TKR_MINT_ADDRESS);
+    const tkr_token_address = await findAssociatedTokenAddress(contract_acc, tkr_mint);
     const tai_mint = new anchor.web3.PublicKey(process.env.TAI_MINT_ADDRESS);
     const dai_mint = new anchor.web3.PublicKey(process.env.DAI_MINT_ADDRESS);
-
+    console.log(authority)
+    console.log(contract_acc)
 
     const tx = await program.rpc.initialize(
         seed.publicKey.toBuffer(),
@@ -59,15 +62,16 @@ async function main() {
                 contractAccount: contract_acc,
                 authority: authority.publicKey,
                 tkrMint: tkr_mint,
-                tkrToken: await findAssociatedTokenAddress(contract_acc, tkr_mint),
+                tkrToken: tkr_token_address,
                 taiMint: tai_mint,
                 taiToken: await findAssociatedTokenAddress(contract_acc, tai_mint),
                 daiMint: dai_mint,
                 daiToken: await findAssociatedTokenAddress(contract_acc, dai_mint),
                 splProgram: splToken.TOKEN_PROGRAM_ID,
                 rent: anchor.web3.SYSVAR_RENT_PUBKEY,
+                system: anchor.web3.SystemProgram.programId,
             },
-            signers: [authority],
+            signers: [authority, contract_acc]
         });
 
     console.log("Your transaction signature", tx);
