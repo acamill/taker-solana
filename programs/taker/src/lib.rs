@@ -48,74 +48,88 @@ pub mod taker {
     use super::*;
 
     // create the account for the contract account
-    pub fn allocate(ctx: Context<AccountsAllocate>, seed: [u8; 32]) -> Result<()> {
-        let accounts = &ctx.accounts;
+    pub fn allocate(ctx: Context<AccountsAllocate>, seed: [u8; 32], bump: u8) -> Result<()> {
+        let seeds_with_bump = &[&seed[..], &[bump]];
 
+        let accounts = &ctx.accounts;
+        let contract = &accounts.contract;
+        let contract_key = contract.to_account_info().key;
+
+        utils::verify_contract_address(&ctx.program_id, seeds_with_bump, contract_key)?;
+
+        // allocate the space for the contract account
         utils::create_rent_exempt_account(
             ctx.program_id, // The program ID of Taker Contract
             &accounts.authority,
-            &accounts.contract,
-            &seed,
+            &contract.to_account_info(),
+            &[&seed[..], &[bump]],
             ctx.program_id,
             10240,
             &accounts.rent,
             &accounts.system,
         )?;
 
-        emit!(EventContractCreated {
-            addr: *accounts.contract.to_account_info().key,
+        emit!(EventContractAllocated {
+            addr: *contract_key
         });
 
         Ok(())
     }
 
-    pub fn initialize(mut ctx: Context<AccountsInitialize>, seed: [u8; 32]) -> Result<()> {
-        emit!(EventCalledInitialize {});
-
-        let (_, bump_seed) = Pubkey::find_program_address(&[&seed[..]], ctx.program_id);
+    pub fn initialize(
+        mut ctx: Context<AccountsInitialize>,
+        seed: [u8; 32],
+        bump: u8,
+    ) -> Result<()> {
+        let seeds_with_bump = &[&seed[..], &[bump]];
 
         let accounts = &mut ctx.accounts;
-        let contract = &mut accounts.contract_account;
+        let contract = &mut accounts.contract;
         let contract_key = contract.to_account_info().key;
 
-        // // Create accounts for this contract on tkr, tai and dai
-        // utils::create_associated_token_account(
-        //     contract.to_account_info(),
-        //     accounts.authority.to_account_info(),
-        //     accounts.tai_mint.clone(),
-        //     accounts.tai_token.to_account_info(),
-        //     accounts.spl_program.clone(),
-        //     accounts.system.clone(),
-        //     accounts.rent.to_account_info(),
-        // )?;
+        utils::verify_contract_address(&ctx.program_id, seeds_with_bump, contract_key)?;
 
-        // utils::create_associated_token_account(
-        //     contract.to_account_info(),
-        //     accounts.authority.to_account_info(),
-        //     accounts.dai_mint.clone(),
-        //     accounts.dai_token.to_account_info(),
-        //     accounts.spl_program.clone(),
-        //     accounts.system.clone(),
-        //     accounts.rent.to_account_info(),
-        // )?;
+        // Create accounts for this contract on tkr, tai and dai
+        utils::create_associated_token_account(
+            &contract,
+            &accounts.authority,
+            &accounts.tai_mint,
+            &accounts.tai_token,
+            &accounts.ata_program,
+            &accounts.spl_program,
+            &accounts.system,
+            &accounts.rent,
+        )?;
 
-        // utils::create_associated_token_account(
-        //     contract.to_account_info(),
-        //     accounts.authority.to_account_info(),
-        //     accounts.tkr_mint.clone(),
-        //     accounts.tkr_token.to_account_info(),
-        //     accounts.spl_program.clone(),
-        //     accounts.system.clone(),
-        //     accounts.rent.to_account_info(),
-        // )?;
+        utils::create_associated_token_account(
+            &contract,
+            &accounts.authority,
+            &accounts.dai_mint,
+            &accounts.dai_token,
+            &accounts.ata_program,
+            &accounts.spl_program,
+            &accounts.system,
+            &accounts.rent,
+        )?;
+
+        utils::create_associated_token_account(
+            &contract,
+            &accounts.authority,
+            &accounts.tkr_mint,
+            &accounts.tkr_token,
+            &accounts.ata_program,
+            &accounts.spl_program,
+            &accounts.system,
+            &accounts.rent,
+        )?;
 
         // set corresponding fields
         contract.authority = *accounts.authority.key;
         contract.seed = seed.to_vec();
-        contract.bump_seed = bump_seed;
-        // contract.tkr_mint = *accounts.tkr_mint.key;
-        // contract.tai_mint = *accounts.tai_mint.key;
-        // contract.dai_mint = *accounts.dai_mint.key;
+        contract.bump_seed = bump;
+        contract.tkr_mint = *accounts.tkr_mint.key;
+        contract.tai_mint = *accounts.tai_mint.key;
+        contract.dai_mint = *accounts.dai_mint.key;
 
         contract.deposit_incentive = 100;
         contract.max_loan_duration = 30;
@@ -125,6 +139,8 @@ pub mod taker {
         // 1%
         contract.interest_rate = 100;
         contract.total_num_loans = 0;
+
+        emit!(EventContractInitialized {});
 
         Ok(())
     }
@@ -178,19 +194,26 @@ pub struct AccountsAllocate<'info> {
 
 #[derive(Accounts)]
 pub struct AccountsInitialize<'info> {
-    #[account(init)]
-    pub contract_account: ProgramAccount<'info, TakerContract>,
-
     #[account(signer)]
     pub authority: AccountInfo<'info>, // also the funder
-    // pub tkr_mint: AccountInfo<'info>,
-    // pub tkr_token: CpiAccount<'info, TokenAccount>,
-    // pub tai_mint: AccountInfo<'info>,
-    // pub tai_token: CpiAccount<'info, TokenAccount>,
-    // pub dai_mint: AccountInfo<'info>,
-    // pub dai_token: CpiAccount<'info, TokenAccount>,
-    // pub spl_program: AccountInfo<'info>,
-    // pub system: AccountInfo<'info>,
+    #[account(init)]
+    pub contract: ProgramAccount<'info, TakerContract>,
+
+    pub tkr_mint: AccountInfo<'info>,
+    #[account(mut)]
+    pub tkr_token: AccountInfo<'info>,
+
+    pub tai_mint: AccountInfo<'info>,
+    #[account(mut)]
+    pub tai_token: AccountInfo<'info>,
+
+    pub dai_mint: AccountInfo<'info>,
+    #[account(mut)]
+    pub dai_token: AccountInfo<'info>,
+
+    pub ata_program: AccountInfo<'info>,
+    pub spl_program: AccountInfo<'info>,
+    pub system: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
 }
 
@@ -214,14 +237,16 @@ pub struct AccountsDepositNFT<'info> {
 pub enum TakerError {
     #[msg("Not Authorized")]
     NotAuhorized,
+    #[msg("Contract address not correct")]
+    ContractAddressNotCorrect,
 }
 
 #[event]
 #[derive(Debug)]
-pub struct EventCalledInitialize {}
+pub struct EventContractInitialized {}
 
 #[event]
 #[derive(Debug)]
-pub struct EventContractCreated {
+pub struct EventContractAllocated {
     addr: Pubkey,
 }

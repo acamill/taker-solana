@@ -1,53 +1,35 @@
-use anyhow::{Error, Result};
-use fehler::throws;
-use log::info;
-use solana_client::pubsub_client::PubsubClient;
-use solana_client::rpc_config::RpcTransactionLogsConfig;
-use solana_client::rpc_config::RpcTransactionLogsFilter;
+use anchor_client::{Client, Cluster};
+use anyhow::Result;
+use rand::rngs::OsRng;
+use solana_sdk::{pubkey::Pubkey, signature::Keypair};
+use std::thread::sleep;
+use std::time::Duration;
 use structopt::StructOpt;
+use taker::{EventContractAllocated, EventContractInitialized};
 
 #[derive(Debug, StructOpt)]
-#[structopt(name = "example", about = "An example of StructOpt usage.")]
+#[structopt(name = "listener", about = "Making transactions to the Taker Protocol")]
 struct Opt {
-    #[structopt(long, env, default_value = "https://devnet.solana.com")]
-    solana_rpc_url: String,
-
-    #[structopt(long, env, default_value = "wss://devnet.solana.com")]
-    solana_sub_url: String,
-
-    #[structopt(long, short = "p", env)]
-    taker_program_addr: String,
+    #[structopt(long, env, short = "p")]
+    taker_program_address: Pubkey,
 }
 
 fn main() -> Result<()> {
     let opt = Opt::from_args();
-    let _ = env_logger::init();
+    let acc = Keypair::generate(&mut OsRng);
 
-    let program_id = opt.taker_program_addr;
-    info!("Listening to {}", program_id);
-    loop {
-        match imp(&opt.solana_sub_url, &program_id.to_string()) {
-            Ok(_) => unreachable!(),
-            Err(_) => {
-                // error!("{}", e)
-            }
-        }
-    }
-}
+    let client = Client::new(Cluster::Devnet, acc);
+    let program = client.program(opt.taker_program_address);
 
-#[allow(unreachable_code)]
-#[throws(Error)]
-fn imp(solana_sub_url: &str, program_id: &str) {
-    let (_pc, rx) = PubsubClient::logs_subscribe(
-        solana_sub_url,
-        RpcTransactionLogsFilter::Mentions(vec![program_id.into()]),
-        RpcTransactionLogsConfig { commitment: None },
-    )?;
+    let _h = program.on(|_, e: EventContractAllocated| {
+        println!("{:?}", e);
+    })?;
 
-    loop {
-        let msg = rx.recv()?;
-        for l in msg.value.logs {
-            info!("{}", l);
-        }
-    }
+    // let _h = program.on(|_, e: EventContractInitialized| {
+    //     println!("{:?}", e);
+    // })?;
+
+    sleep(Duration::from_secs(1000000));
+
+    Ok(())
 }

@@ -25,7 +25,7 @@ fn main() -> Result<()> {
 
     let seed = solana_sdk::signature::Keypair::generate(&mut OsRng);
 
-    let (contract, _) =
+    let (contract, bump) =
         Pubkey::find_program_address(&[&seed.pubkey().to_bytes()[..]], &program.id());
 
     let tx = program
@@ -38,12 +38,13 @@ fn main() -> Result<()> {
         })
         .args(taker::instruction::Allocate {
             seed: seed.pubkey().to_bytes(),
+            bump,
         })
         .signer(&**authority)
         .send()?;
 
     println!("The transaction is {}", tx);
-    println!("Contract address: {}", contract);
+    println!("Contract address: {}, seed: {}", contract, seed.pubkey());
 
     Ok(())
 }

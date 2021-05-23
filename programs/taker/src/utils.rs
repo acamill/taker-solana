@@ -1,22 +1,30 @@
+use crate::{TakerContract, TakerError};
 use anchor_lang::prelude::*;
-use fehler::throws;
+use anchor_spl::token::TokenAccount;
+use fehler::{throw, throws};
 use solana_program::{instruction::Instruction, program::invoke_signed};
 use solana_program::{program::invoke, system_instruction};
+
+#[throws(ProgramError)]
+pub fn verify_contract_address(program_id: &Pubkey, seeds_with_bump: &[&[u8]], account: &Pubkey) {
+    let addr = Pubkey::create_program_address(seeds_with_bump, program_id)?;
+
+    if &addr != account {
+        throw!(TakerError::ContractAddressNotCorrect);
+    }
+}
 
 #[throws(ProgramError)]
 pub fn create_rent_exempt_account<'info>(
     program_id: &Pubkey, // The program ID of Taker Contract
     funder: &AccountInfo<'info>,
     account: &AccountInfo<'info>,
-    seed: &[u8],
+    seeds_with_bump: &[&[u8]],
     owner: &Pubkey,
     acc_size: u64,
     rent: &Sysvar<'info, Rent>,
     system: &AccountInfo<'info>,
 ) {
-    let (addr, bump_seed) = Pubkey::find_program_address(&[seed], program_id);
-    assert_eq!(&addr, account.key);
-
     let required_lamports = rent.minimum_balance(acc_size as usize).max(1);
 
     invoke_signed(
@@ -28,30 +36,40 @@ pub fn create_rent_exempt_account<'info>(
             program_id,
         ),
         &[funder.clone(), account.clone(), system.clone()],
-        &[&[&seed[..], &[bump_seed]]],
+        &[seeds_with_bump],
     )?;
 }
 
 #[throws(ProgramError)]
 pub fn create_associated_token_account<'info>(
-    wallet: AccountInfo<'info>,
-    authority: AccountInfo<'info>,
-    mint: AccountInfo<'info>,
-    token_address: AccountInfo<'info>,
-    token_program: AccountInfo<'info>,
-    system: AccountInfo<'info>,
-    rent: AccountInfo<'info>,
+    wallet: &ProgramAccount<'info, TakerContract>,
+    funder: &AccountInfo<'info>,
+    mint: &AccountInfo<'info>,
+    token_account: &AccountInfo<'info>,
+    ata_program: &AccountInfo<'info>,
+    spl_program: &AccountInfo<'info>,
+    system_program: &AccountInfo<'info>,
+    rent: &Sysvar<'info, Rent>,
 ) {
+    // Accounts expected by this instruction:
+    //
+    //   0. `[writeable,signer]` Funding account (must be a system account)
+    //   1. `[writeable]` Associated token account address to be created
+    //   2. `[]` Wallet address for the new associated token account
+    //   3. `[]` The token mint for the new associated token account
+    //   4. `[]` System program
+    //   5. `[]` SPL Token program
+    //   6. `[]` Rent sysvar
     let ix = Instruction {
-        program_id: *token_program.key,
+        program_id: *ata_program.key,
         accounts: vec![
-            AccountMeta::new(*authority.key, true),
-            AccountMeta::new(*token_address.key, false),
-            AccountMeta::new_readonly(*wallet.key, false),
+            AccountMeta::new(*funder.key, true),
+            AccountMeta::new(*token_account.key, false),
+            AccountMeta::new_readonly(*wallet.to_account_info().key, false),
             AccountMeta::new_readonly(*mint.key, false),
-            AccountMeta::new_readonly(*system.key, false),
-            AccountMeta::new_readonly(*token_program.key, false),
-            AccountMeta::new_readonly(*rent.key, false),
+            AccountMeta::new_readonly(*system_program.key, false),
+            AccountMeta::new_readonly(*spl_program.key, false),
+            AccountMeta::new_readonly(*rent.to_account_info().key, false),
         ],
         data: vec![],
     };
@@ -59,13 +77,13 @@ pub fn create_associated_token_account<'info>(
     invoke(
         &ix,
         &[
-            authority,
-            token_address,
-            wallet,
-            mint,
-            system,
-            token_program,
-            rent,
+            funder.to_account_info(),
+            token_account.to_account_info(),
+            wallet.to_account_info(),
+            mint.clone(),
+            system_program.clone(),
+            spl_program.clone(),
+            rent.to_account_info(),
         ],
     )?;
 }
