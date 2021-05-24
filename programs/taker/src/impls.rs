@@ -7,14 +7,12 @@ type Result<T> = std::result::Result<T, ProgramError>;
 impl TakerContract {
     pub fn new<'info>(
         ctx: &Context<AccountsInitialize<'info>>,
-        seed: &[u8],
         bump: u8,
     ) -> Result<ProgramAccount<'info, Self>> {
         let accounts = &ctx.accounts;
         let this = &accounts.this;
 
         let instance = Self {
-            seed: seed.to_vec(),
             bump_seed: bump,
             authority: *accounts.authority.key,
             tkr_mint: *accounts.tkr_mint.key,
@@ -40,7 +38,7 @@ impl TakerContract {
             ctx.program_id, // The program ID of Taker Contract
             &accounts.authority,
             &this,
-            &[&seed[..], &[bump]],
+            &[&[bump]],
             ctx.program_id,
             acc_size,
             &accounts.rent,

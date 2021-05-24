@@ -10,11 +10,12 @@ use anchor_spl::token::TokenAccount;
 use fehler::throw;
 use solana_program::pubkey::Pubkey;
 use std::collections::HashMap;
+use std::convert::TryInto;
+pub use utils::*;
 
 // The contract account should have address find_program_address(&[seed], program_id)
 #[account]
 pub struct TakerContract {
-    pub seed: Vec<u8>,
     pub bump_seed: u8,
     pub authority: Pubkey,
     pub tkr_mint: Pubkey,
@@ -34,14 +35,14 @@ pub mod taker {
 
     use super::*;
 
-    pub fn initialize(ctx: Context<AccountsInitialize>, seed: [u8; 32], bump: u8) -> Result<()> {
-        let seeds_with_bump = &[&seed[..], &[bump]];
+    pub fn initialize(ctx: Context<AccountsInitialize>) -> Result<()> {
+        let (_, bump) = get_pool_address_with_bump(ctx.program_id);
 
         let accounts = &ctx.accounts;
 
-        utils::verify_contract_address(&ctx.program_id, seeds_with_bump, &accounts.this.key)?;
+        utils::verify_pool_address(&ctx.program_id, bump, &accounts.this.key)?;
 
-        let this = TakerContract::new(&ctx, &seed[..], bump)?;
+        let this = TakerContract::new(&ctx, bump)?;
 
         emit!(EventContractAllocated {
             addr: *this.to_account_info().key
@@ -54,7 +55,7 @@ pub mod taker {
             (&accounts.tai_mint, &accounts.tai_token),
         ] {
             utils::create_associated_token_account(
-                &this,
+                &this.to_account_info(),
                 &accounts.authority,
                 mint,
                 token,
@@ -70,21 +71,63 @@ pub mod taker {
         Ok(())
     }
 
-    // The NFT associated account for this contract must be already created
     pub fn deposit_nft(ctx: Context<AccountsDepositNFT>) -> Result<()> {
-        let accounts = ctx.accounts;
-        let contract = &mut accounts.contract_account;
-        let seeds_with_bump = &[&contract.seed[..], &[contract.bump_seed]];
+        let AccountsDepositNFT {
+            this,
+            user_authority,
+            nft_mint,
+            nft_src,
+            nft_dst,
+            tkr_mint,
+            tkr_src,
+            tkr_dst,
+            ata_program,
+            spl_program,
+            system,
+            rent,
+            listing,
+        } = ctx.accounts;
 
-        assert!(accounts.tkr_src.mint == contract.tkr_mint);
+        let seeds_with_bump: &[&[_]] = &[&[this.bump_seed]];
+
+        assert_eq!(tkr_mint.key, &this.tkr_mint);
+        assert_eq!(tkr_src.mint, this.tkr_mint);
+
+        // allocate the nft ata for the pool if not allocate
+        if !is_account_allocated(nft_dst) {
+            utils::create_associated_token_account(
+                &this.to_account_info(),
+                &user_authority,
+                &nft_mint,
+                &nft_dst,
+                &ata_program,
+                &spl_program,
+                &system,
+                &rent,
+            )?;
+        }
+
+        // allocate the tkr ata for the user if not allocate
+        if !is_account_allocated(tkr_dst) {
+            utils::create_associated_token_account(
+                &user_authority,
+                &user_authority,
+                &tkr_mint,
+                &tkr_dst,
+                &ata_program,
+                &spl_program,
+                &system,
+                &rent,
+            )?;
+        }
 
         anchor_spl::token::transfer(
             CpiContext::new(
-                accounts.spl_program.clone(),
+                spl_program.clone(),
                 anchor_spl::token::Transfer {
-                    from: accounts.nft_src.to_account_info(),
-                    to: accounts.nft_dst.to_account_info(),
-                    authority: accounts.user_authority.clone(),
+                    from: nft_src.to_account_info(),
+                    to: nft_dst.clone(),
+                    authority: user_authority.clone(),
                 },
             ),
             1,
@@ -92,21 +135,52 @@ pub mod taker {
 
         anchor_spl::token::transfer(
             CpiContext::new_with_signer(
-                accounts.spl_program.clone(),
+                spl_program.clone(),
                 anchor_spl::token::Transfer {
-                    from: accounts.tkr_src.to_account_info(),
-                    to: accounts.tkr_dst.to_account_info(),
-                    authority: contract.to_account_info(),
+                    from: tkr_src.to_account_info(),
+                    to: tkr_dst.clone(),
+                    authority: this.to_account_info(),
                 },
                 &[seeds_with_bump],
             ),
-            contract.deposit_incentive,
+            this.deposit_incentive,
         )?;
 
-        // now
-        // contract
-        //     .nft_ownership
-        //     .insert(*accounts.nft_mint.key, *accounts.user_authority.key);
+        // create the listing account if not created
+        let (_, bump) =
+            get_nft_listing_address_with_bump(ctx.program_id, nft_mint.key, user_authority.key);
+
+        verify_nft_listing_address(
+            ctx.program_id,
+            nft_mint.key,
+            user_authority.key,
+            bump,
+            listing.key,
+        )?;
+
+        if !is_account_allocated(listing) {
+            let seeds_with_bump_for_listing: &[&[_]] = &[
+                &nft_mint.key.to_bytes(),
+                &user_authority.key.to_bytes(),
+                &[bump],
+            ];
+            utils::create_rent_exempt_account(
+                ctx.program_id,
+                user_authority,
+                listing,
+                seeds_with_bump_for_listing,
+                ctx.program_id,
+                8,
+                &rent,
+                &system,
+            )?;
+        }
+
+        let mut data = listing.try_borrow_mut_data()?;
+        let bytes: [u8; 8] = (&**data).try_into().unwrap();
+        let n = u64::from_le_bytes(bytes);
+        data.copy_from_slice(&(n + 1).to_le_bytes());
+
         Ok(())
     }
 }
@@ -137,35 +211,30 @@ pub struct AccountsInitialize<'info> {
 }
 
 #[derive(Accounts)]
-pub struct AccountsInitializeNFTAccount<'info> {
+pub struct AccountsDepositNFT<'info> {
+    pub this: ProgramAccount<'info, TakerContract>,
     #[account(signer)]
-    pub funder: AccountInfo<'info>, // the funder
-    pub contract: ProgramAccount<'info, TakerContract>,
+    pub user_authority: AccountInfo<'info>,
 
     pub nft_mint: AccountInfo<'info>,
     #[account(mut)]
-    pub nft_token: AccountInfo<'info>,
+    pub nft_src: CpiAccount<'info, TokenAccount>,
+    #[account(mut)]
+    pub nft_dst: AccountInfo<'info>, // potentially this is not allocated yet
+
+    pub tkr_mint: AccountInfo<'info>,
+    #[account(mut)]
+    pub tkr_src: CpiAccount<'info, TokenAccount>,
+    #[account(mut)]
+    pub tkr_dst: AccountInfo<'info>, // potentially this is not allocated yet
+
+    #[account(mut)]
+    pub listing: AccountInfo<'info>,
 
     pub ata_program: AccountInfo<'info>,
     pub spl_program: AccountInfo<'info>,
     pub system: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
-}
-
-#[derive(Accounts)]
-pub struct AccountsDepositNFT<'info> {
-    #[account(mut)]
-    pub contract_account: ProgramAccount<'info, TakerContract>,
-
-    #[account(signer)]
-    pub user_authority: AccountInfo<'info>,
-    pub nft_mint: AccountInfo<'info>,
-    pub nft_src: CpiAccount<'info, TokenAccount>,
-    pub nft_dst: CpiAccount<'info, TokenAccount>,
-
-    pub tkr_src: CpiAccount<'info, TokenAccount>,
-    pub tkr_dst: CpiAccount<'info, TokenAccount>,
-    pub spl_program: AccountInfo<'info>,
 }
 
 #[error]
@@ -174,6 +243,8 @@ pub enum TakerError {
     NotAuhorized,
     #[msg("Contract address not correct")]
     ContractAddressNotCorrect,
+    #[msg("NFT listing address not correct")]
+    NFTListingAddressNotCorrect,
 }
 
 #[event]

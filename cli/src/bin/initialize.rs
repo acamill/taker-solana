@@ -1,9 +1,9 @@
 use anchor_client::{Client, Cluster};
 use anyhow::Result;
 use cli::Keypair;
-use rand::rngs::OsRng;
 use solana_sdk::{pubkey::Pubkey, signature::Signer, system_program, sysvar};
 use structopt::StructOpt;
+use taker::get_pool_address;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
@@ -34,31 +34,29 @@ fn main() -> Result<()> {
     let client = Client::new(Cluster::Devnet, authority.clone().0);
     let program = client.program(opt.taker_program_address);
 
-    let seed = solana_sdk::signature::Keypair::generate(&mut OsRng);
-    let (contract, bump) =
-        Pubkey::find_program_address(&[&seed.pubkey().to_bytes()[..]], &program.id());
+    let pool = get_pool_address(&program.id());
 
     let tx = program
         .request()
         .accounts(taker::accounts::AccountsInitialize {
             authority: authority.pubkey(),
-            this: contract,
+            this: pool,
 
             tkr_mint: opt.tkr_mint_address,
             tkr_token: spl_associated_token_account::get_associated_token_address(
-                &contract,
+                &pool,
                 &opt.tkr_mint_address,
             ),
 
             tai_mint: opt.tai_mint_address,
             tai_token: spl_associated_token_account::get_associated_token_address(
-                &contract,
+                &pool,
                 &opt.tai_mint_address,
             ),
 
             dai_mint: opt.dai_mint_address,
             dai_token: spl_associated_token_account::get_associated_token_address(
-                &contract,
+                &pool,
                 &opt.dai_mint_address,
             ),
 
@@ -67,15 +65,11 @@ fn main() -> Result<()> {
             rent: sysvar::rent::id(),
             system: system_program::id(),
         })
-        .args(taker::instruction::Initialize {
-            seed: seed.pubkey().to_bytes(),
-            bump,
-        })
+        .args(taker::instruction::Initialize {})
         .signer(&**authority)
         .send()?;
 
     println!("The transaction is {}", tx);
-    println!("Contract address: {}, seed: {}", contract, seed.pubkey());
 
     Ok(())
 }
