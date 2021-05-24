@@ -1,5 +1,5 @@
 cli prog +ARGS="":
-  cd cli && cargo run --bin {{prog}} -- {{ARGS}}
+  cargo run --bin {{prog}} -- {{ARGS}}
 
 build:
   anchor build
@@ -22,3 +22,6 @@ b58keypair:
   with open(Path.home() / ".config/solana/id.json") as f:
       j = json.load(f)
   print(base58.b58encode(bytes(j)))
+
+transfer-tkr-to-pool dst:
+  spl-token transfer $TKR_MINT_ADDRESS 1000 {{dst}}

@@ -565,6 +565,7 @@ dependencies = [
  "log",
  "rand 0.7.3",
  "serde",
+ "serde_json",
  "solana-client",
  "solana-logger",
  "solana-sdk",

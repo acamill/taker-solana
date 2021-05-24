@@ -7,15 +7,18 @@ use taker::get_pool_address;
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
 struct Opt {
     #[structopt(long, env, short = "p")]
-    taker_program_address: Pubkey,
+    taker_program_address: Option<Pubkey>,
 }
 
 fn main() -> Result<()> {
     solana_logger::setup_with("solana=debug");
 
     let opt = Opt::from_args();
+    let program_id = opt
+        .taker_program_address
+        .unwrap_or_else(cli::load_program_from_idl);
 
-    let pool = get_pool_address(&opt.taker_program_address);
+    let pool = get_pool_address(&program_id);
 
     println!("The pool address is {}", pool);
 

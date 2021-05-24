@@ -11,15 +11,17 @@ use taker::EventContractAllocated;
 #[structopt(name = "listener", about = "Making transactions to the Taker Protocol")]
 struct Opt {
     #[structopt(long, env, short = "p")]
-    taker_program_address: Pubkey,
+    taker_program_address: Option<Pubkey>,
 }
 
 fn main() -> Result<()> {
     let opt = Opt::from_args();
-    let acc = Keypair::generate(&mut OsRng);
+    let program_id = opt
+        .taker_program_address
+        .unwrap_or_else(cli::load_program_from_idl);
 
-    let client = Client::new(Cluster::Devnet, acc);
-    let program = client.program(opt.taker_program_address);
+    let client = Client::new(Cluster::Devnet, Keypair::generate(&mut OsRng));
+    let program = client.program(program_id);
 
     let _h = program.on(|_, e: EventContractAllocated| {
         println!("{:?}", e);

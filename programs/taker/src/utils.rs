@@ -1,6 +1,5 @@
-use crate::{TakerContract, TakerError};
+use crate::TakerError;
 use anchor_lang::prelude::*;
-use anchor_spl::token::TokenAccount;
 use fehler::{throw, throws};
 use solana_program::{instruction::Instruction, program::invoke_signed, system_program};
 use solana_program::{program::invoke, system_instruction};
@@ -57,12 +56,11 @@ pub fn verify_pool_address(program_id: &Pubkey, bump: u8, pool_address: &Pubkey)
 }
 
 #[throws(ProgramError)]
-pub fn create_rent_exempt_account<'info>(
+pub fn create_derived_account_with_seed<'info>(
     program_id: &Pubkey, // The program ID of Taker Contract
     funder: &AccountInfo<'info>,
     account: &AccountInfo<'info>,
     seeds_with_bump: &[&[u8]],
-    owner: &Pubkey,
     acc_size: u64,
     rent: &Sysvar<'info, Rent>,
     system: &AccountInfo<'info>,
