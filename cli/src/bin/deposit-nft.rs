@@ -69,7 +69,7 @@ fn main() -> Result<()> {
             rent: sysvar::rent::id(),
             system: system_program::id(),
         })
-        .args(taker::instruction::DepositNft {})
+        .args(taker::instruction::DepositNft { count: 1 })
         .signer(&**taker_user)
         .send()?;
 

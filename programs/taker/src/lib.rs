@@ -5,7 +5,7 @@ mod nft_pool;
 mod utils;
 
 use anchor_lang::prelude::*;
-use anchor_spl::token::TokenAccount;
+use anchor_spl::token::{Mint, TokenAccount};
 use solana_program::pubkey::Pubkey;
 
 pub use utils::*;
@@ -29,6 +29,12 @@ pub struct NFTPool {
 #[account]
 pub struct NFTListing {
     pub count: u64,
+    pub available: u64, // how many are available to be withdrawn or used as collateral
+}
+
+#[account]
+pub struct NFTBid {
+    pub price: u64,
 }
 
 #[program]
@@ -71,90 +77,84 @@ pub mod taker {
         Ok(())
     }
 
-    pub fn deposit_nft(ctx: Context<AccountsDepositNFT>) -> Result<()> {
+    pub fn deposit_nft(ctx: Context<AccountsDepositNFT>, count: u64) -> Result<()> {
         let AccountsDepositNFT {
             pool,
-            user_wallet_account: user_authority,
+            user_wallet_account,
             nft_mint,
-            user_nft_account: nft_src,
-            pool_nft_account: nft_dst,
+            user_nft_account,
+            pool_nft_account,
             tkr_mint,
-            pool_tkr_account: tkr_src,
-            user_tkr_account: tkr_dst,
+            pool_tkr_account,
+            user_tkr_account,
             ata_program,
             spl_program,
             system,
             rent,
-            listing_account: listing,
+            listing_account,
         } = ctx.accounts;
 
-        assert_eq!(tkr_mint.key, &pool.tkr_mint);
-        assert_eq!(tkr_src.mint, pool.tkr_mint);
+        assert_eq!(tkr_mint.to_account_info().key, &pool.tkr_mint);
+        assert_eq!(pool_tkr_account.mint, pool.tkr_mint);
 
         // allocate the nft ata for the pool if not allocate
-        if !is_account_allocated(nft_dst) {
-            utils::create_associated_token_account(
-                &pool.to_account_info(),
-                &user_authority,
-                &nft_mint,
-                &nft_dst,
-                &ata_program,
-                &spl_program,
-                &system,
-                &rent,
-            )?;
-        }
+        NFTPool::ensure_pool_nft_account(
+            pool,
+            nft_mint,
+            pool_nft_account,
+            user_wallet_account,
+            ata_program,
+            spl_program,
+            system,
+            rent,
+        )?;
 
         // allocate the tkr ata for the user if not allocate
-        if !is_account_allocated(tkr_dst) {
-            utils::create_associated_token_account(
-                &user_authority,
-                &user_authority,
-                &tkr_mint,
-                &tkr_dst,
-                &ata_program,
-                &spl_program,
-                &system,
-                &rent,
-            )?;
-        }
+        NFTPool::ensure_user_tkr_account(
+            user_wallet_account,
+            tkr_mint,
+            user_tkr_account,
+            ata_program,
+            spl_program,
+            system,
+            rent,
+        )?;
 
         anchor_spl::token::transfer(
             CpiContext::new(
                 spl_program.clone(),
                 anchor_spl::token::Transfer {
-                    from: nft_src.to_account_info(),
-                    to: nft_dst.clone(),
-                    authority: user_authority.clone(),
+                    from: user_nft_account.to_account_info(),
+                    to: pool_nft_account.clone(),
+                    authority: user_wallet_account.clone(),
                 },
             ),
-            1,
+            count,
         )?;
 
         anchor_spl::token::transfer(
             CpiContext::new_with_signer(
                 spl_program.clone(),
                 anchor_spl::token::Transfer {
-                    from: tkr_src.to_account_info(),
-                    to: tkr_dst.clone(),
+                    from: pool_tkr_account.to_account_info(),
+                    to: user_tkr_account.clone(),
                     authority: pool.to_account_info(),
                 },
                 &[&[&[pool.bump_seed]]],
             ),
-            pool.deposit_incentive,
+            count * pool.deposit_incentive * tkr_mint.decimals as u64,
         )?;
 
         // create the listing account if not created
         let mut listing = NFTListing::ensure(
             ctx.program_id,
-            nft_mint.key,
-            user_authority,
-            listing,
+            nft_mint.to_account_info().key,
+            user_wallet_account,
+            listing_account,
             rent,
             system,
         )?;
-
-        listing.count += 1;
+        listing.deposit(1);
 
         // Persistent back the data. Since we created the ProgramAccount by ourselves, we need to do this manually.
         listing.exit(ctx.program_id)?;
@@ -176,20 +176,19 @@ pub mod taker {
         // verify the listing account indeed belongs to the user
         let (_, bump) = get_nft_listing_address_with_bump(
             ctx.program_id,
-            nft_mint.key,
+            nft_mint.to_account_info().key,
             user_wallet_account.key,
         );
         verify_nft_listing_address(
             ctx.program_id,
-            nft_mint.key,
+            nft_mint.to_account_info().key,
             user_wallet_account.key,
             bump,
             listing_account.to_account_info().key,
         )?;
 
         // verify the user indeed listed `count` many NFTs
-        assert!(listing_account.count >= count);
-        listing_account.count -= count;
+        listing_account.withdraw(count)?;
 
         // transfer the NFT back to the user
         anchor_spl::token::transfer(
@@ -207,6 +206,10 @@ pub mod taker {
 
         Ok(())
     }
+
+    pub fn bid(ctx: Context<AccountsBid>) -> Result<()> {
+        Ok(())
+    }
 }
 
 #[derive(Accounts)]
@@ -216,18 +219,17 @@ pub struct AccountsInitialize<'info> {
     #[account(mut)]
     pub pool: AccountInfo<'info>, // We cannot use  ProgramAccount<'info, TakerContract> here because it is not allocated yet
 
-    pub tkr_mint: AccountInfo<'info>,
+    pub tkr_mint: CpiAccount<'info, Mint>,
     #[account(mut)]
     pub pool_tkr_account: AccountInfo<'info>, // this is not allocated yet
 
-    pub tai_mint: AccountInfo<'info>,
+    pub tai_mint: CpiAccount<'info, Mint>,
     #[account(mut)]
     pub pool_tai_account: AccountInfo<'info>, // this is not allocated yet
 
-    pub dai_mint: AccountInfo<'info>,
+    pub dai_mint: CpiAccount<'info, Mint>,
     #[account(mut)]
     pub pool_dai_account: AccountInfo<'info>, // this is not allocated yet
-
     pub ata_program: AccountInfo<'info>,
     pub spl_program: AccountInfo<'info>,
     pub system: AccountInfo<'info>,
@@ -240,13 +242,13 @@ pub struct AccountsDepositNFT<'info> {
     #[account(signer)]
     pub user_wallet_account: AccountInfo<'info>,
 
-    pub nft_mint: AccountInfo<'info>,
+    pub nft_mint: CpiAccount<'info, Mint>,
     #[account(mut)]
     pub user_nft_account: CpiAccount<'info, TokenAccount>,
     #[account(mut)]
     pub pool_nft_account: AccountInfo<'info>, // potentially this is not allocated yet
 
-    pub tkr_mint: AccountInfo<'info>,
+    pub tkr_mint: CpiAccount<'info, Mint>,
     #[account(mut)]
     pub pool_tkr_account: CpiAccount<'info, TokenAccount>,
     #[account(mut)]
@@ -254,7 +256,6 @@ pub struct AccountsDepositNFT<'info> {
 
     #[account(mut)]
     pub listing_account: AccountInfo<'info>, // Essentially this is ProgramAccount<NFTListing>, however, we've not allocated the space for it yet. We cannot use ProgramAccount here.
-
     pub ata_program: AccountInfo<'info>,
     pub spl_program: AccountInfo<'info>,
     pub system: AccountInfo<'info>,
@@ -267,7 +268,25 @@ pub struct AccountsWithdrawNFT<'info> {
     #[account(signer)]
     pub user_wallet_account: AccountInfo<'info>,
 
-    pub nft_mint: AccountInfo<'info>,
+    pub nft_mint: CpiAccount<'info, Mint>,
+    #[account(mut)]
+    pub pool_nft_account: CpiAccount<'info, TokenAccount>,
+    #[account(mut)]
+    pub user_nft_account: CpiAccount<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub listing_account: ProgramAccount<'info, NFTListing>,
+
+    pub spl_program: AccountInfo<'info>,
+}
+
+#[derive(Accounts)]
+pub struct AccountsBid<'info> {
+    pub pool: ProgramAccount<'info, NFTPool>,
+    #[account(signer)]
+    pub user_wallet_account: AccountInfo<'info>,
+
+    pub nft_mint: CpiAccount<'info, Mint>,
     #[account(mut)]
     pub pool_nft_account: CpiAccount<'info, TokenAccount>,
     #[account(mut)]
@@ -287,6 +306,12 @@ pub enum TakerError {
     ContractAddressNotCorrect,
     #[msg("NFT listing address not correct")]
     NFTListingAddressNotCorrect,
+
+    #[msg("NFT overdrawn")]
+    NFTOverdrawn,
+
+    #[msg("NFT overborrow")]
+    NFTOverborrow,
 }
 
 #[event]
