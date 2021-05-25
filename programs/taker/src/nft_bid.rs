@@ -12,15 +12,15 @@ impl NFTBid {
     #[throws(ProgramError)]
     pub fn ensure<'info>(
         program_id: &Pubkey,
-        mint: &Pubkey,
+        nft_mint: &Pubkey,
         wallet: &AccountInfo<'info>,
         bid_account: &AccountInfo<'info>,
         rent: &Sysvar<'info, Rent>,
         system: &AccountInfo<'info>,
     ) -> ProgramAccount<'info, Self> {
-        let (_, bump) = Self::get_address_with_bump(program_id, mint, wallet.key);
+        let (_, bump) = Self::get_address_with_bump(program_id, nft_mint, wallet.key);
 
-        Self::verify_address(program_id, mint, wallet.key, bump, bid_account.key)?;
+        Self::verify_address(program_id, nft_mint, wallet.key, bump, bid_account.key)?;
 
         if !crate::utils::is_account_allocated(bid_account) {
             let instance = NFTBid { price: 0, qty: 0 };
@@ -32,7 +32,7 @@ impl NFTBid {
 
             let seeds_with_bump: &[&[_]] = &[
                 Self::SEED,
-                &mint.to_bytes(),
+                &nft_mint.to_bytes(),
                 &wallet.key.to_bytes(),
                 &[bump],
             ];
@@ -68,7 +68,7 @@ impl NFTBid {
         }
     }
 
-    pub fn bid(&mut self, price: u64, qty: u64) {
+    pub fn set(&mut self, price: u64, qty: u64) {
         self.price = price;
         self.qty = qty;
     }

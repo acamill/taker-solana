@@ -148,12 +148,12 @@ pub mod taker {
     }
 
     // Deposits NFT asset into the pool, creating an entry of NFTListing
-    pub fn mortgage_nft(ctx: Context<AccountsMortgageNFT>, count: u64) -> Result<()> {
+    pub fn deposit_nft(ctx: Context<AccountsDepositNFT>, count: u64) -> Result<()> {
         if count == 0 {
             return Ok(());
         }
 
-        let AccountsMortgageNFT {
+        let AccountsDepositNFT {
             pool,
             borrower_wallet_account,
 
@@ -242,10 +242,11 @@ pub mod taker {
         // Persistent back the data. Since we created the ProgramAccount by ourselves, we need to do this manually.
         listing.exit(ctx.program_id)?;
 
-        emit!(EventNFTMortgaged {
+        emit!(EventNFTDeposited {
             mint: *nft_mint.to_account_info().key,
             from: *borrower_wallet_account.key,
-            count: count
+            count: count,
+            total: listing.count,
         });
 
         Ok(())
@@ -256,9 +257,9 @@ pub mod taker {
         // TODO: Do we set the minimal nft lock in time?
         let AccountsWithdrawNFT {
             pool,
-            user_wallet_account,
+            borrower_wallet_account,
             nft_mint,
-            user_nft_account,
+            borrower_nft_account,
             pool_nft_account,
             listing_account,
             spl_program,
@@ -268,12 +269,12 @@ pub mod taker {
         let (_, bump) = NFTListing::get_address_with_bump(
             ctx.program_id,
             nft_mint.to_account_info().key,
-            user_wallet_account.key,
+            borrower_wallet_account.key,
         );
         NFTListing::verify_address(
             ctx.program_id,
             nft_mint.to_account_info().key,
-            user_wallet_account.key,
+            borrower_wallet_account.key,
             bump,
             listing_account.to_account_info().key,
         )?;
@@ -287,7 +288,7 @@ pub mod taker {
                 spl_program.clone(),
                 anchor_spl::token::Transfer {
                     from: pool_nft_account.to_account_info(),
-                    to: user_nft_account.to_account_info(),
+                    to: borrower_nft_account.to_account_info(),
                     authority: pool.to_account_info(),
                 },
                 &[&[NFTPool::SEED, &[pool.bump_seed]]],
@@ -295,27 +296,34 @@ pub mod taker {
             count,
         )?;
 
+        emit!(EventNFTWithdrawn {
+            mint: *nft_mint.to_account_info().key,
+            to: *borrower_wallet_account.key,
+            count: count,
+            total: listing_account.count,
+        });
+
         Ok(())
     }
 
-    pub fn bid(ctx: Context<AccountsBid>, price: u64, qty: u64) -> Result<()> {
+    pub fn place_bid(ctx: Context<AccountsPlaceBid>, price: u64, qty: u64) -> Result<()> {
         if qty == 0 {
             return Ok(());
         }
 
-        let AccountsBid {
+        let AccountsPlaceBid {
             pool,
-            user_wallet_account,
+            lender_wallet_account,
             nft_mint,
-            user_dai_account,
+            lender_dai_account,
             bid_account,
             spl_program,
-            system_program: system,
+            system_program,
             rent,
         } = ctx.accounts;
 
         if qty > nft_mint.supply {
-            throw!(TakerError::NFTOverbid);
+            throw!(TakerError::NFTBidQtyLargerThanSupply);
         }
 
         assert_eq!(nft_mint.decimals, 0);
@@ -324,35 +332,43 @@ pub mod taker {
             CpiContext::new(
                 spl_program.clone(),
                 anchor_spl::token::Approve {
-                    to: user_dai_account.to_account_info(),
+                    to: lender_dai_account.to_account_info(),
                     delegate: pool.to_account_info(),
-                    authority: user_wallet_account.to_account_info(),
+                    authority: lender_wallet_account.to_account_info(),
                 },
             ),
             price * qty,
         )?;
 
-        // create the listing account if not created
+        // create the bid account if not created
         let mut bid_account = NFTBid::ensure(
             ctx.program_id,
             nft_mint.to_account_info().key,
-            user_wallet_account,
+            lender_wallet_account,
             bid_account,
             rent,
-            system,
+            system_program,
         )?;
-        bid_account.bid(price, qty);
+        bid_account.set(price, qty);
 
         // Persistent back the data. Since we created the ProgramAccount by ourselves, we need to do this manually.
         bid_account.exit(ctx.program_id)?;
+
+        emit!(EventNFTBidPlaced {
+            mint: *nft_mint.to_account_info().key,
+            from: *lender_wallet_account.key,
+            price,
+            qty,
+        });
+
         Ok(())
     }
 
     pub fn cancel_bid(ctx: Context<AccountsCancelBid>, revoke: bool) -> Result<()> {
         let AccountsCancelBid {
-            user_wallet_account,
+            lender_wallet_account,
             nft_mint,
-            user_dai_account,
+            lender_dai_account,
             bid_account,
             spl_program,
         } = ctx.accounts;
@@ -362,15 +378,23 @@ pub mod taker {
         let (_, bump) = NFTBid::get_address_with_bump(
             ctx.program_id,
             nft_mint.to_account_info().key,
-            user_wallet_account.key,
+            lender_wallet_account.key,
         );
+
         NFTBid::verify_address(
             ctx.program_id,
             nft_mint.to_account_info().key,
-            user_wallet_account.key,
+            lender_wallet_account.key,
             bump,
             bid_account.to_account_info().key,
         )?;
+
+        emit!(EventNFTBidCancelled {
+            mint: *nft_mint.to_account_info().key,
+            from: *lender_wallet_account.key,
+            price: bid_account.price,
+            qty: bid_account.qty,
+        });
 
         bid_account.cancel();
 
@@ -378,13 +402,13 @@ pub mod taker {
             solana_program::program::invoke(
                 &spl_token::instruction::revoke(
                     &spl_token::id(),
-                    user_dai_account.to_account_info().key,
-                    user_wallet_account.to_account_info().key,
-                    &[user_wallet_account.key],
+                    lender_dai_account.to_account_info().key,
+                    lender_wallet_account.to_account_info().key,
+                    &[lender_wallet_account.key],
                 )?,
                 &[
-                    user_dai_account.to_account_info(),
-                    user_wallet_account.to_account_info(),
+                    lender_dai_account.to_account_info(),
+                    lender_wallet_account.to_account_info(),
                     spl_program.clone(),
                 ],
             )?;
@@ -608,7 +632,7 @@ pub struct AccountsChangeLoanSetting<'info> {
 }
 
 #[derive(Accounts)]
-pub struct AccountsMortgageNFT<'info> {
+pub struct AccountsDepositNFT<'info> {
     pub pool: ProgramAccount<'info, NFTPool>,
     #[account(signer)]
     pub borrower_wallet_account: AccountInfo<'info>,
@@ -640,13 +664,13 @@ pub struct AccountsMortgageNFT<'info> {
 pub struct AccountsWithdrawNFT<'info> {
     pub pool: ProgramAccount<'info, NFTPool>,
     #[account(signer)]
-    pub user_wallet_account: AccountInfo<'info>,
+    pub borrower_wallet_account: AccountInfo<'info>,
 
     pub nft_mint: CpiAccount<'info, Mint>,
     #[account(mut)]
     pub pool_nft_account: CpiAccount<'info, TokenAccount>,
     #[account(mut)]
-    pub user_nft_account: CpiAccount<'info, TokenAccount>,
+    pub borrower_nft_account: CpiAccount<'info, TokenAccount>,
 
     #[account(mut)]
     pub listing_account: ProgramAccount<'info, NFTListing>,
@@ -655,14 +679,14 @@ pub struct AccountsWithdrawNFT<'info> {
 }
 
 #[derive(Accounts)]
-pub struct AccountsBid<'info> {
+pub struct AccountsPlaceBid<'info> {
     pub pool: ProgramAccount<'info, NFTPool>,
     #[account(signer)]
-    pub user_wallet_account: AccountInfo<'info>,
+    pub lender_wallet_account: AccountInfo<'info>,
 
     pub nft_mint: CpiAccount<'info, Mint>,
     #[account(mut)]
-    pub user_dai_account: CpiAccount<'info, TokenAccount>,
+    pub lender_dai_account: CpiAccount<'info, TokenAccount>,
 
     #[account(mut)]
     pub bid_account: AccountInfo<'info>, // Essentially this is ProgramAccount<NFTBid>, however, we've not allocated the space for it yet. We cannot use ProgramAccount here.
@@ -675,11 +699,11 @@ pub struct AccountsBid<'info> {
 #[derive(Accounts)]
 pub struct AccountsCancelBid<'info> {
     #[account(signer)]
-    pub user_wallet_account: AccountInfo<'info>,
+    pub lender_wallet_account: AccountInfo<'info>,
 
     pub nft_mint: CpiAccount<'info, Mint>,
     #[account(mut)]
-    pub user_dai_account: CpiAccount<'info, TokenAccount>,
+    pub lender_dai_account: CpiAccount<'info, TokenAccount>,
 
     #[account(mut)]
     pub bid_account: ProgramAccount<'info, NFTBid>,
@@ -785,8 +809,8 @@ pub enum TakerError {
     #[msg("NFT overtrade")]
     NFTOvertrade,
 
-    #[msg("NFT bid amount larger than NFT supply")]
-    NFTOverbid,
+    #[msg("NFT bid qty larger than NFT supply")]
+    NFTBidQtyLargerThanSupply,
 
     #[msg("NFT borrow amount larger than bid amount")]
     NFTBorrowExceedBid,
@@ -828,8 +852,36 @@ pub struct EventLoanSettingChanged {
 
 #[event]
 #[derive(Debug)]
-pub struct EventNFTMortgaged {
+pub struct EventNFTDeposited {
     mint: Pubkey,
     from: Pubkey,
     count: u64,
+    total: u64,
+}
+
+#[event]
+#[derive(Debug)]
+pub struct EventNFTWithdrawn {
+    mint: Pubkey,
+    to: Pubkey,
+    count: u64,
+    total: u64,
+}
+
+#[event]
+#[derive(Debug)]
+pub struct EventNFTBidPlaced {
+    mint: Pubkey,
+    from: Pubkey,
+    price: u64,
+    qty: u64,
+}
+
+#[event]
+#[derive(Debug)]
+pub struct EventNFTBidCancelled {
+    mint: Pubkey,
+    from: Pubkey,
+    price: u64,
+    qty: u64,
 }

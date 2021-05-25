@@ -38,10 +38,10 @@ fn main() -> Result<()> {
         .request()
         .accounts(taker::accounts::AccountsWithdrawNFT {
             pool,
-            user_wallet_account: taker_user.pubkey(),
+            borrower_wallet_account: taker_user.pubkey(),
 
             nft_mint: opt.nft_mint_address,
-            user_nft_account: dbg!(get_associated_token_address(
+            borrower_nft_account: dbg!(get_associated_token_address(
                 &taker_user.pubkey(),
                 &opt.nft_mint_address
             )),

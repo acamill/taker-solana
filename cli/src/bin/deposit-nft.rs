@@ -38,7 +38,7 @@ fn main() -> Result<()> {
 
     let tx = program
         .request()
-        .accounts(taker::accounts::AccountsMortgageNFT {
+        .accounts(taker::accounts::AccountsDepositNFT {
             pool,
             borrower_wallet_account: opt.borrower_wallet_keypair.pubkey(),
 
@@ -67,7 +67,7 @@ fn main() -> Result<()> {
             rent: sysvar::rent::id(),
             system_program: system_program::id(),
         })
-        .args(taker::instruction::MortgageNft { count: 1 })
+        .args(taker::instruction::DepositNft { count: 1 })
         .signer(&*opt.borrower_wallet_keypair)
         .send()?;
 

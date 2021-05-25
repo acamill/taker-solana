@@ -13,7 +13,7 @@ struct Opt {
     taker_program_address: Option<Pubkey>,
 
     #[structopt(long, env)]
-    taker_user: Keypair,
+    lender_account_keypair: Keypair,
 
     #[structopt(long, env)]
     dai_mint_address: Pubkey,
@@ -30,32 +30,32 @@ fn main() -> Result<()> {
         .taker_program_address
         .unwrap_or_else(load_program_from_idl);
 
-    let taker_user = &opt.taker_user;
+    let lender_account_keypair = &opt.lender_account_keypair;
 
-    let client = Client::new(Cluster::Devnet, taker_user.clone().0);
+    let client = Client::new(Cluster::Devnet, lender_account_keypair.clone().0);
     let program = client.program(program_id);
 
     let tx = program
         .request()
         .accounts(taker::accounts::AccountsCancelBid {
-            user_wallet_account: taker_user.pubkey(),
+            lender_wallet_account: lender_account_keypair.pubkey(),
 
             nft_mint: opt.nft_mint_address,
-            user_dai_account: dbg!(get_associated_token_address(
-                &taker_user.pubkey(),
+            lender_dai_account: dbg!(get_associated_token_address(
+                &lender_account_keypair.pubkey(),
                 &opt.dai_mint_address
             )),
 
             bid_account: dbg!(NFTBid::get_address(
                 &program_id,
                 &opt.nft_mint_address,
-                &taker_user.pubkey(),
+                &lender_account_keypair.pubkey(),
             )),
 
             spl_program: spl_token::id(),
         })
         .args(taker::instruction::CancelBid { revoke: true })
-        .signer(&**taker_user)
+        .signer(&**lender_account_keypair)
         .send()?;
 
     println!("The transaction is {}", tx);

@@ -36,40 +36,40 @@ fn main() -> Result<()> {
         .taker_program_address
         .unwrap_or_else(load_program_from_idl);
 
-    let taker_user = &opt.lender_wallet_keypair;
+    let lender_wallet_keypair = &opt.lender_wallet_keypair;
 
-    let client = Client::new(Cluster::Devnet, taker_user.clone().0);
+    let client = Client::new(Cluster::Devnet, lender_wallet_keypair.clone().0);
     let program = client.program(program_id);
 
     let pool = NFTPool::get_address(&program.id());
 
     let tx = program
         .request()
-        .accounts(taker::accounts::AccountsBid {
+        .accounts(taker::accounts::AccountsPlaceBid {
             pool,
-            user_wallet_account: taker_user.pubkey(),
+            lender_wallet_account: lender_wallet_keypair.pubkey(),
 
             nft_mint: opt.nft_mint_address,
-            user_dai_account: dbg!(get_associated_token_address(
-                &taker_user.pubkey(),
+            lender_dai_account: dbg!(get_associated_token_address(
+                &lender_wallet_keypair.pubkey(),
                 &opt.dai_mint_address
             )),
 
             bid_account: dbg!(NFTBid::get_address(
                 &program_id,
                 &opt.nft_mint_address,
-                &taker_user.pubkey(),
+                &lender_wallet_keypair.pubkey(),
             )),
 
             spl_program: spl_token::id(),
             system_program: system_program::id(),
             rent: sysvar::rent::id(),
         })
-        .args(taker::instruction::Bid {
+        .args(taker::instruction::PlaceBid {
             price: opt.price,
             qty: opt.qty,
         })
-        .signer(&**taker_user)
+        .signer(&**lender_wallet_keypair)
         .send()?;
 
     println!("The transaction is {}", tx);
