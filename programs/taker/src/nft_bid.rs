@@ -1,32 +1,29 @@
 use anchor_lang::prelude::Pubkey;
 
-use crate::{utils, DerivedAccountIdentifier, NFTListing, TakerError};
+use crate::{utils, DerivedAccountIdentifier, NFTBid, TakerError};
 use anchor_lang::prelude::*;
 use fehler::{throw, throws};
 
-impl DerivedAccountIdentifier for NFTListing {
-    const SEED: &'static [u8] = b"TakerNFTListing";
+impl DerivedAccountIdentifier for NFTBid {
+    const SEED: &'static [u8] = b"TakerNFTBid";
 }
 
-impl NFTListing {
+impl NFTBid {
     #[throws(ProgramError)]
     pub fn ensure<'info>(
         program_id: &Pubkey,
         mint: &Pubkey,
         wallet: &AccountInfo<'info>,
-        listing: &AccountInfo<'info>,
+        bid_account: &AccountInfo<'info>,
         rent: &Sysvar<'info, Rent>,
         system: &AccountInfo<'info>,
-    ) -> ProgramAccount<'info, NFTListing> {
+    ) -> ProgramAccount<'info, Self> {
         let (_, bump) = Self::get_address_with_bump(program_id, mint, wallet.key);
 
-        Self::verify_address(program_id, mint, wallet.key, bump, listing.key)?;
+        Self::verify_address(program_id, mint, wallet.key, bump, bid_account.key)?;
 
-        if !crate::utils::is_account_allocated(listing) {
-            let instance = NFTListing {
-                count: 0,
-                available: 0,
-            };
+        if !crate::utils::is_account_allocated(bid_account) {
+            let instance = NFTBid { price: 0, qty: 0 };
 
             let acc_size = 8 + instance
                 .try_to_vec()
@@ -43,7 +40,7 @@ impl NFTListing {
             utils::create_derived_account_with_seed(
                 program_id,
                 wallet,
-                listing,
+                bid_account,
                 seeds_with_bump,
                 acc_size,
                 &rent,
@@ -51,58 +48,39 @@ impl NFTListing {
             )?;
 
             {
-                let mut data = listing.try_borrow_mut_data()?;
+                let mut data = bid_account.try_borrow_mut_data()?;
                 let mut cursor = std::io::Cursor::new(&mut **data);
                 instance.try_serialize(&mut cursor)?;
             }
         }
 
-        ProgramAccount::try_from(listing)?
-    }
-
-    pub fn deposit(&mut self, count: u64) {
-        self.count += count;
-        self.available += count;
+        ProgramAccount::try_from(bid_account)?
     }
 
     #[throws(TakerError)]
-    pub fn withdraw(&mut self, count: u64) {
-        if count > self.available {
-            throw!(TakerError::NFTOverdrawn)
+    pub fn trade(&mut self, qty: u64) {
+        if qty > self.qty {
+            throw!(TakerError::NFTOvertrade)
         }
-
-        self.count -= count;
-        self.available -= count;
-    }
-
-    #[throws(TakerError)]
-    pub fn liquidate(&mut self, count: u64) {
-        if count > self.available {
-            throw!(TakerError::NFTOverdrawn)
+        self.qty -= qty;
+        if self.qty == 0 {
+            self.price = 0;
         }
-
-        self.count -= count;
-        self.available -= count;
     }
 
-    #[throws(TakerError)]
-    pub fn borrow_success(&mut self) {
-        if self.available <= 0 {
-            throw!(TakerError::EmptyNFTReserve)
-        }
-
-        self.available -= 1;
+    pub fn bid(&mut self, price: u64, qty: u64) {
+        self.price = price;
+        self.qty = qty;
     }
 
-    pub fn repay_success(&mut self) {
-        self.available += 1;
-
-        assert!(self.available <= self.count);
+    pub fn cancel(&mut self) {
+        self.price = 0;
+        self.qty = 0;
     }
 
-    // An program derived account that stores nft listing
+    // An program derived account that stores nft bid
     // The address of the account is computed as follow:
-    // address = find_program_address([NFTListing::SEED, nft_mint_address, user_wallet_address], program_id)
+    // address = find_program_address([NFTBid::SEED, nft_mint_address, user_wallet_address], program_id)
     // only the taker_contract_address can change the data in this account
     pub fn get_address(program_id: &Pubkey, nft_mint: &Pubkey, wallet: &Pubkey) -> Pubkey {
         Self::get_address_with_bump(program_id, nft_mint, wallet).0
@@ -138,7 +116,7 @@ impl NFTListing {
         )?;
 
         if &addr != address {
-            throw!(TakerError::NFTListingAddressNotCorrect);
+            throw!(TakerError::NFTBidAddressNotCorrect);
         }
     }
 }

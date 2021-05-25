@@ -3,7 +3,7 @@ use anyhow::Result;
 use cli::Keypair;
 use solana_sdk::{pubkey::Pubkey, signature::Signer, system_program, sysvar};
 use structopt::StructOpt;
-use taker::get_pool_address;
+use taker::NFTPool;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
@@ -37,7 +37,7 @@ fn main() -> Result<()> {
     let client = Client::new(Cluster::Devnet, authority.clone().0);
     let program = client.program(program_id);
 
-    let pool = get_pool_address(&program.id());
+    let pool = NFTPool::get_address(&program.id());
 
     let tx = program
         .request()

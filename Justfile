@@ -24,4 +24,4 @@ b58keypair:
   print(base58.b58encode(bytes(j)))
 
 transfer-tkr-to-pool dst:
-  spl-token transfer $TKR_MINT_ADDRESS 1000 {{dst}}
+  spl-token transfer $TKR_MINT_ADDRESS 10000 {{dst}}

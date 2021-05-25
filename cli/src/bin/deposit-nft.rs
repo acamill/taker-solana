@@ -4,8 +4,8 @@ use cli::{load_program_from_idl, Keypair};
 use solana_sdk::{pubkey::Pubkey, signature::Signer, system_program, sysvar};
 use spl_associated_token_account::get_associated_token_address;
 use structopt::StructOpt;
-use taker::get_nft_listing_address;
-use taker::get_pool_address;
+use taker::NFTListing;
+use taker::NFTPool;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
@@ -36,7 +36,7 @@ fn main() -> Result<()> {
     let client = Client::new(Cluster::Devnet, taker_user.clone().0);
     let program = client.program(program_id);
 
-    let pool = get_pool_address(&program.id());
+    let pool = NFTPool::get_address(&program.id());
 
     let tx = program
         .request()
@@ -58,7 +58,7 @@ fn main() -> Result<()> {
                 &opt.tkr_mint_address
             )),
 
-            listing_account: dbg!(get_nft_listing_address(
+            listing_account: dbg!(NFTListing::get_address(
                 &program_id,
                 &opt.nft_mint_address,
                 &taker_user.pubkey(),

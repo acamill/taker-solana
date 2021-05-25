@@ -19,8 +19,8 @@ impl NFTPool {
             tkr_mint: *accounts.tkr_mint.to_account_info().key,
             tai_mint: *accounts.tai_mint.to_account_info().key,
             dai_mint: *accounts.dai_mint.to_account_info().key,
-            deposit_incentive: 100,
-            max_loan_duration: 30,
+            deposit_incentive: 100 * 10u64.pow(accounts.tkr_mint.decimals as u32) as u64,
+            max_loan_duration: 30 * 24 * 60 * 60, // 30 days
             // 5%
             service_fee_rate: 500,
             // 1%
@@ -56,22 +56,22 @@ impl NFTPool {
         Ok(this)
     }
 
-    pub fn ensure_pool_nft_account<'info>(
+    pub fn ensure_pool_token_account<'info>(
         pool: &ProgramAccount<'info, NFTPool>,
-        nft_mint: &CpiAccount<'info, Mint>,
-        pool_nft_account: &AccountInfo<'info>,
+        mint: &CpiAccount<'info, Mint>,
+        pool_token_account: &AccountInfo<'info>,
         user_wallet_account: &AccountInfo<'info>,
         ata_program: &AccountInfo<'info>,
         spl_program: &AccountInfo<'info>,
         system: &AccountInfo<'info>,
         rent: &Sysvar<'info, Rent>,
     ) -> Result<()> {
-        if !utils::is_account_allocated(pool_nft_account) {
+        if !utils::is_account_allocated(pool_token_account) {
             utils::create_associated_token_account(
                 &pool.to_account_info(),
                 user_wallet_account,
-                nft_mint,
-                pool_nft_account,
+                mint,
+                pool_token_account,
                 ata_program,
                 spl_program,
                 system,
@@ -82,21 +82,21 @@ impl NFTPool {
         Ok(())
     }
 
-    pub fn ensure_user_tkr_account<'info>(
+    pub fn ensure_user_token_account<'info>(
         user_wallet_account: &AccountInfo<'info>,
-        tkr_mint: &CpiAccount<'info, Mint>,
-        user_tkr_account: &AccountInfo<'info>,
+        mint: &CpiAccount<'info, Mint>,
+        user_token_account: &AccountInfo<'info>,
         ata_program: &AccountInfo<'info>,
         spl_program: &AccountInfo<'info>,
         system: &AccountInfo<'info>,
         rent: &Sysvar<'info, Rent>,
     ) -> Result<()> {
-        if !utils::is_account_allocated(user_tkr_account) {
+        if !utils::is_account_allocated(user_token_account) {
             utils::create_associated_token_account(
                 user_wallet_account,
                 user_wallet_account,
-                tkr_mint,
-                user_tkr_account,
+                mint,
+                user_token_account,
                 ata_program,
                 spl_program,
                 system,
@@ -122,41 +122,20 @@ impl NFTPool {
     //     )?;
     // }
 
-    // An program derived account that stores nft listing
-    // The address of the account is computed as follow:
-    // address = find_program_address([nft_mint_address, user_wallet_address], program_id)
-    // only the taker_contract_address can change the data in this account
-    pub fn get_nft_listing_address(
-        program_id: &Pubkey,
-        nft_mint: &Pubkey,
-        wallet: &Pubkey,
-    ) -> Pubkey {
-        Self::get_nft_listing_address_with_bump(program_id, nft_mint, wallet).0
+    pub fn get_address(program_id: &Pubkey) -> Pubkey {
+        Self::get_address_with_bump(program_id).0
     }
 
-    pub(crate) fn get_nft_listing_address_with_bump(
-        program_id: &Pubkey,
-        nft_mint: &Pubkey,
-        wallet: &Pubkey,
-    ) -> (Pubkey, u8) {
-        Pubkey::find_program_address(&[&nft_mint.to_bytes(), &wallet.to_bytes()], program_id)
+    pub(crate) fn get_address_with_bump(program_id: &Pubkey) -> (Pubkey, u8) {
+        Pubkey::find_program_address(&[], program_id)
     }
 
     #[throws(ProgramError)]
-    pub fn verify_nft_listing_address(
-        program_id: &Pubkey,
-        nft_mint: &Pubkey,
-        wallet: &Pubkey,
-        bump: u8,
-        listing_address: &Pubkey,
-    ) {
-        let addr = Pubkey::create_program_address(
-            &[&nft_mint.to_bytes(), &wallet.to_bytes(), &[bump]],
-            program_id,
-        )?;
+    pub fn verify_address(program_id: &Pubkey, bump: u8, pool_address: &Pubkey) {
+        let addr = Pubkey::create_program_address(&[&[bump]], program_id)?;
 
-        if &addr != listing_address {
-            throw!(TakerError::NFTListingAddressNotCorrect);
+        if &addr != pool_address {
+            throw!(TakerError::ContractAddressNotCorrect);
         }
     }
 }

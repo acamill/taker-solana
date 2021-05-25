@@ -1,26 +1,8 @@
-use crate::TakerError;
 use anchor_lang::prelude::*;
 use anchor_spl::token::Mint;
-use fehler::{throw, throws};
+use fehler::throws;
 use solana_program::{instruction::Instruction, program::invoke_signed, system_program};
 use solana_program::{program::invoke, system_instruction};
-
-pub fn get_pool_address(program_id: &Pubkey) -> Pubkey {
-    get_pool_address_with_bump(program_id).0
-}
-
-pub(crate) fn get_pool_address_with_bump(program_id: &Pubkey) -> (Pubkey, u8) {
-    Pubkey::find_program_address(&[], program_id)
-}
-
-#[throws(ProgramError)]
-pub fn verify_pool_address(program_id: &Pubkey, bump: u8, pool_address: &Pubkey) {
-    let addr = Pubkey::create_program_address(&[&[bump]], program_id)?;
-
-    if &addr != pool_address {
-        throw!(TakerError::ContractAddressNotCorrect);
-    }
-}
 
 #[throws(ProgramError)]
 pub fn create_derived_account_with_seed<'info>(

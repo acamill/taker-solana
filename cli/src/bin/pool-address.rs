@@ -1,7 +1,7 @@
 use anyhow::Result;
 use solana_sdk::pubkey::Pubkey;
 use structopt::StructOpt;
-use taker::get_pool_address;
+use taker::NFTPool;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
@@ -18,7 +18,7 @@ fn main() -> Result<()> {
         .taker_program_address
         .unwrap_or_else(cli::load_program_from_idl);
 
-    let pool = get_pool_address(&program_id);
+    let pool = NFTPool::get_address(&program_id);
 
     println!("The pool address is {}", pool);
 
