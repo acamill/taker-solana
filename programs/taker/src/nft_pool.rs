@@ -25,8 +25,6 @@ impl NFTPool {
             service_fee_rate: 500,
             // 1%
             interest_rate: 100,
-            // Total number of loans generated
-            total_num_loans: 0,
         };
 
         let acc_size = 8 + instance
@@ -106,21 +104,6 @@ impl NFTPool {
 
         Ok(())
     }
-
-    // pub fn deposit_nft(program_id: &Pubkey, src: &AccountInfo, dst: AccountInfo) {
-    //     anchor_spl::token::transfer(
-    //         CpiContext::new_with_signer(
-    //             spl_program.clone(),
-    //             anchor_spl::token::Transfer {
-    //                 from: tkr_src.to_account_info(),
-    //                 to: tkr_dst.clone(),
-    //                 authority: pool.to_account_info(),
-    //             },
-    //             &[&[&[pool.bump_seed]]],
-    //         ),
-    //         pool.deposit_incentive,
-    //     )?;
-    // }
 
     pub fn get_address(program_id: &Pubkey) -> Pubkey {
         Self::get_address_with_bump(program_id).0

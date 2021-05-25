@@ -1,22 +1,16 @@
 use anchor_client::{Client, Cluster};
 use anyhow::Result;
-use cli::Keypair;
+use rand::rngs::OsRng;
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Signer;
+use solana_sdk::signature::Keypair;
 use structopt::StructOpt;
-use taker::NFTListing;
+use taker::NFTPool;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
 struct Opt {
     #[structopt(long, env, short = "p")]
     taker_program_address: Option<Pubkey>,
-
-    #[structopt(long, env)]
-    taker_user: Keypair,
-
-    #[structopt(long, env)]
-    nft_mint_address: Pubkey,
 }
 
 fn main() -> Result<()> {
@@ -27,17 +21,16 @@ fn main() -> Result<()> {
         .taker_program_address
         .unwrap_or_else(cli::load_program_from_idl);
 
-    let listing =
-        NFTListing::get_address(&program_id, &opt.nft_mint_address, &opt.taker_user.pubkey());
+    let pool_account = NFTPool::get_address(&program_id);
 
-    let client = Client::new(Cluster::Devnet, opt.taker_user.clone().0);
+    let client = Client::new(Cluster::Devnet, Keypair::generate(&mut OsRng));
     let program = client.program(program_id);
 
-    let content: taker::NFTListing = program.account(listing)?;
+    let content: NFTPool = program.account(pool_account)?;
 
     println!(
-        "The listing address is {} with {} listed",
-        listing, content.count
+        "The pool address is {} with content {:?}",
+        pool_account, content
     );
 
     Ok(())

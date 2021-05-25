@@ -20,6 +20,7 @@ pub trait DerivedAccountIdentifier {
 
 // The contract account should have address find_program_address(&[seed], program_id)
 #[account]
+#[derive(Debug)]
 pub struct NFTPool {
     pub bump_seed: u8,
     pub authority: Pubkey,
@@ -30,17 +31,17 @@ pub struct NFTPool {
     pub max_loan_duration: i64,
     pub service_fee_rate: u64, // in bp, one ten thousandth
     pub interest_rate: u64,    // in bp, one ten thousandth
-    // Total number of loans generated
-    pub total_num_loans: u64,
 }
 
 #[account]
+#[derive(Debug)]
 pub struct NFTListing {
     pub count: u64,
     pub available: u64, // how many are available to be withdrawn or used as collateral
 }
 
 #[account]
+#[derive(Debug)]
 pub struct NFTBid {
     pub price: u64, // DAI Price
     pub qty: u64,
@@ -348,13 +349,14 @@ pub mod taker {
 
         // transfer DAI to the borrower
         anchor_spl::token::transfer(
-            CpiContext::new(
+            CpiContext::new_with_signer(
                 spl_program.clone(),
                 anchor_spl::token::Transfer {
                     from: lender_dai_account.to_account_info(),
                     to: borrower_dai_account.to_account_info(),
                     authority: pool.to_account_info(), // The pool is the delegate
                 },
+                &[&[&[pool.bump_seed]]],
             ),
             amount,
         )?;
@@ -660,7 +662,6 @@ pub struct AccountsRepay<'info> {
 pub struct AccountsLiquidate<'info> {
     pub pool: ProgramAccount<'info, NFTPool>,
 
-    // pub borrower_wallet_account: AccountInfo<'info>,
     #[account(signer)]
     pub lender_wallet_account: AccountInfo<'info>,
 

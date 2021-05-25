@@ -13,7 +13,7 @@ struct Opt {
     taker_program_address: Option<Pubkey>,
 
     #[structopt(long, env)]
-    taker_user: Keypair,
+    lender_wallet_keypair: Keypair,
 
     #[structopt(long, env)]
     dai_mint_address: Pubkey,
@@ -21,10 +21,10 @@ struct Opt {
     #[structopt(long, env)]
     nft_mint_address: Pubkey,
 
-    #[structopt(long, env)]
+    #[structopt(long)]
     price: u64,
 
-    #[structopt(long, env)]
+    #[structopt(long)]
     qty: u64,
 }
 
@@ -36,7 +36,7 @@ fn main() -> Result<()> {
         .taker_program_address
         .unwrap_or_else(load_program_from_idl);
 
-    let taker_user = &opt.taker_user;
+    let taker_user = &opt.lender_wallet_keypair;
 
     let client = Client::new(Cluster::Devnet, taker_user.clone().0);
     let program = client.program(program_id);
