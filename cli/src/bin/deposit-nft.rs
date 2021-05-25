@@ -14,7 +14,7 @@ struct Opt {
     taker_program_address: Option<Pubkey>,
 
     #[structopt(long, env)]
-    taker_user: Keypair,
+    borrower_wallet_keypair: Keypair,
 
     #[structopt(long, env)]
     tkr_mint_address: Pubkey,
@@ -31,22 +31,20 @@ fn main() -> Result<()> {
         .taker_program_address
         .unwrap_or_else(load_program_from_idl);
 
-    let taker_user = &opt.taker_user;
-
-    let client = Client::new(Cluster::Devnet, taker_user.clone().0);
+    let client = Client::new(Cluster::Devnet, opt.borrower_wallet_keypair.clone().0);
     let program = client.program(program_id);
 
     let pool = NFTPool::get_address(&program.id());
 
     let tx = program
         .request()
-        .accounts(taker::accounts::AccountsDepositNFT {
+        .accounts(taker::accounts::AccountsMortgageNFT {
             pool,
-            user_wallet_account: taker_user.pubkey(),
+            borrower_wallet_account: opt.borrower_wallet_keypair.pubkey(),
 
             nft_mint: opt.nft_mint_address,
             user_nft_account: dbg!(get_associated_token_address(
-                &taker_user.pubkey(),
+                &opt.borrower_wallet_keypair.pubkey(),
                 &opt.nft_mint_address
             )),
             pool_nft_account: dbg!(get_associated_token_address(&pool, &opt.nft_mint_address)),
@@ -54,23 +52,23 @@ fn main() -> Result<()> {
             tkr_mint: opt.tkr_mint_address,
             pool_tkr_account: dbg!(get_associated_token_address(&pool, &opt.tkr_mint_address)),
             user_tkr_account: dbg!(get_associated_token_address(
-                &taker_user.pubkey(),
+                &opt.borrower_wallet_keypair.pubkey(),
                 &opt.tkr_mint_address
             )),
 
             listing_account: dbg!(NFTListing::get_address(
                 &program_id,
                 &opt.nft_mint_address,
-                &taker_user.pubkey(),
+                &opt.borrower_wallet_keypair.pubkey(),
             )),
 
             ata_program: spl_associated_token_account::id(),
             spl_program: spl_token::id(),
             rent: sysvar::rent::id(),
-            system: system_program::id(),
+            system_program: system_program::id(),
         })
-        .args(taker::instruction::DepositNft { count: 1 })
-        .signer(&**taker_user)
+        .args(taker::instruction::MortgageNft { count: 1 })
+        .signer(&*opt.borrower_wallet_keypair)
         .send()?;
 
     println!("The transaction is {}", tx);

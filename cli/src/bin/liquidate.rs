@@ -69,7 +69,7 @@ fn main() -> Result<()> {
 
             ata_program: spl_associated_token_account::id(),
             spl_program: spl_token::id(),
-            system: system_program::id(),
+            system_program: system_program::id(),
             rent: sysvar::rent::id(),
             clock: sysvar::clock::id(),
         })

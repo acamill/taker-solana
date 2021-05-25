@@ -12,15 +12,15 @@ impl NFTListing {
     #[throws(ProgramError)]
     pub fn ensure<'info>(
         program_id: &Pubkey,
-        mint: &Pubkey,
-        wallet: &AccountInfo<'info>,
+        nft_mint: &Pubkey,
+        user_wallet: &AccountInfo<'info>,
         listing: &AccountInfo<'info>,
         rent: &Sysvar<'info, Rent>,
-        system: &AccountInfo<'info>,
+        system_program: &AccountInfo<'info>,
     ) -> ProgramAccount<'info, NFTListing> {
-        let (_, bump) = Self::get_address_with_bump(program_id, mint, wallet.key);
+        let (_, bump) = Self::get_address_with_bump(program_id, nft_mint, user_wallet.key);
 
-        Self::verify_address(program_id, mint, wallet.key, bump, listing.key)?;
+        Self::verify_address(program_id, nft_mint, user_wallet.key, bump, listing.key)?;
 
         if !crate::utils::is_account_allocated(listing) {
             let instance = NFTListing {
@@ -35,19 +35,19 @@ impl NFTListing {
 
             let seeds_with_bump: &[&[_]] = &[
                 Self::SEED,
-                &mint.to_bytes(),
-                &wallet.key.to_bytes(),
+                &nft_mint.to_bytes(),
+                &user_wallet.key.to_bytes(),
                 &[bump],
             ];
 
             utils::create_derived_account_with_seed(
                 program_id,
-                wallet,
+                user_wallet,
                 listing,
                 seeds_with_bump,
                 acc_size,
                 &rent,
-                &system,
+                &system_program,
             )?;
 
             {

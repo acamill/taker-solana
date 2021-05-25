@@ -76,7 +76,7 @@ pub mod taker {
 
             ata_program,
             spl_program,
-            system,
+            system_program: system,
             rent,
         } = ctx.accounts;
 
@@ -117,6 +117,7 @@ pub mod taker {
         emit!(EventContractAllocated {
             account: *pool.to_account_info().key
         });
+
         Ok(())
     }
 
@@ -146,66 +147,74 @@ pub mod taker {
         Ok(())
     }
 
-    pub fn deposit_nft(ctx: Context<AccountsDepositNFT>, count: u64) -> Result<()> {
+    // Deposits NFT asset into the pool, creating an entry of NFTListing
+    pub fn mortgage_nft(ctx: Context<AccountsMortgageNFT>, count: u64) -> Result<()> {
         if count == 0 {
             return Ok(());
         }
 
-        let AccountsDepositNFT {
+        let AccountsMortgageNFT {
             pool,
-            user_wallet_account,
+            borrower_wallet_account,
+
             nft_mint,
+            tkr_mint,
+
             user_nft_account,
             pool_nft_account,
-            tkr_mint,
             pool_tkr_account,
             user_tkr_account,
+
+            listing_account,
+
+            rent,
+
             ata_program,
             spl_program,
-            system,
-            rent,
-            listing_account,
+            system_program,
         } = ctx.accounts;
 
         assert_eq!(tkr_mint.to_account_info().key, &pool.tkr_mint);
         assert_eq!(pool_tkr_account.mint, pool.tkr_mint);
         assert_eq!(nft_mint.decimals, 0);
 
-        // allocate the nft ata for the pool if not allocate
+        // allocate the NFT ATA for the pool if not allocated
         NFTPool::ensure_pool_token_account(
             pool,
             nft_mint,
             pool_nft_account,
-            user_wallet_account,
+            borrower_wallet_account,
             ata_program,
             spl_program,
-            system,
+            system_program,
             rent,
         )?;
 
-        // allocate the tkr ata for the user if not allocate
+        // allocate the TKR ATA for the user if not allocated
         NFTPool::ensure_user_token_account(
-            user_wallet_account,
+            borrower_wallet_account,
             tkr_mint,
             user_tkr_account,
             ata_program,
             spl_program,
-            system,
+            system_program,
             rent,
         )?;
 
+        // Transfer NFT to the pool
         anchor_spl::token::transfer(
             CpiContext::new(
                 spl_program.clone(),
                 anchor_spl::token::Transfer {
                     from: user_nft_account.to_account_info(),
                     to: pool_nft_account.clone(),
-                    authority: user_wallet_account.clone(),
+                    authority: borrower_wallet_account.clone(),
                 },
             ),
             count,
         )?;
 
+        // Transfer incentive to the borrower
         anchor_spl::token::transfer(
             CpiContext::new_with_signer(
                 spl_program.clone(),
@@ -214,7 +223,7 @@ pub mod taker {
                     to: user_tkr_account.clone(),
                     authority: pool.to_account_info(),
                 },
-                &[&[&[pool.bump_seed]]],
+                &[&[NFTPool::SEED, &[pool.bump_seed]]],
             ),
             count * pool.incentive,
         )?;
@@ -223,18 +232,26 @@ pub mod taker {
         let mut listing = NFTListing::ensure(
             ctx.program_id,
             nft_mint.to_account_info().key,
-            user_wallet_account,
+            borrower_wallet_account,
             listing_account,
             rent,
-            system,
+            system_program,
         )?;
         listing.deposit(count);
 
         // Persistent back the data. Since we created the ProgramAccount by ourselves, we need to do this manually.
         listing.exit(ctx.program_id)?;
+
+        emit!(EventNFTMortgaged {
+            mint: *nft_mint.to_account_info().key,
+            from: *borrower_wallet_account.key,
+            count: count
+        });
+
         Ok(())
     }
 
+    // withdraw the deposited NFT
     pub fn withdraw_nft(ctx: Context<AccountsWithdrawNFT>, count: u64) -> Result<()> {
         // TODO: Do we set the minimal nft lock in time?
         let AccountsWithdrawNFT {
@@ -273,7 +290,7 @@ pub mod taker {
                     to: user_nft_account.to_account_info(),
                     authority: pool.to_account_info(),
                 },
-                &[&[&[pool.bump_seed]]],
+                &[&[NFTPool::SEED, &[pool.bump_seed]]],
             ),
             count,
         )?;
@@ -293,7 +310,7 @@ pub mod taker {
             user_dai_account,
             bid_account,
             spl_program,
-            system,
+            system_program: system,
             rent,
         } = ctx.accounts;
 
@@ -388,7 +405,7 @@ pub mod taker {
             listing_account,
             loan_account,
             spl_program,
-            system,
+            system_program: system,
             rent,
             clock,
         } = ctx.accounts;
@@ -406,7 +423,7 @@ pub mod taker {
                     to: borrower_dai_account.to_account_info(),
                     authority: pool.to_account_info(), // The pool is the delegate
                 },
-                &[&[&[pool.bump_seed]]],
+                &[&[NFTPool::SEED, &[pool.bump_seed]]],
             ),
             amount,
         )?;
@@ -514,7 +531,7 @@ pub mod taker {
 
             ata_program,
             spl_program,
-            system,
+            system_program: system,
             rent,
             clock,
         } = ctx.accounts;
@@ -579,7 +596,7 @@ pub struct AccountsInitialize<'info> {
     pub pool_dai_account: AccountInfo<'info>, // this is not allocated yet
     pub ata_program: AccountInfo<'info>,
     pub spl_program: AccountInfo<'info>,
-    pub system: AccountInfo<'info>,
+    pub system_program: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
 }
 #[derive(Accounts)]
@@ -591,18 +608,19 @@ pub struct AccountsChangeLoanSetting<'info> {
 }
 
 #[derive(Accounts)]
-pub struct AccountsDepositNFT<'info> {
+pub struct AccountsMortgageNFT<'info> {
     pub pool: ProgramAccount<'info, NFTPool>,
     #[account(signer)]
-    pub user_wallet_account: AccountInfo<'info>,
+    pub borrower_wallet_account: AccountInfo<'info>,
 
     pub nft_mint: CpiAccount<'info, Mint>,
+    pub tkr_mint: CpiAccount<'info, Mint>,
+
     #[account(mut)]
     pub user_nft_account: CpiAccount<'info, TokenAccount>,
     #[account(mut)]
     pub pool_nft_account: AccountInfo<'info>, // potentially this is not allocated yet
 
-    pub tkr_mint: CpiAccount<'info, Mint>,
     #[account(mut)]
     pub pool_tkr_account: CpiAccount<'info, TokenAccount>,
     #[account(mut)]
@@ -610,10 +628,12 @@ pub struct AccountsDepositNFT<'info> {
 
     #[account(mut)]
     pub listing_account: AccountInfo<'info>, // Essentially this is ProgramAccount<NFTListing>, however, we've not allocated the space for it yet. We cannot use ProgramAccount here.
+
+    pub rent: Sysvar<'info, Rent>,
+
     pub ata_program: AccountInfo<'info>,
     pub spl_program: AccountInfo<'info>,
-    pub system: AccountInfo<'info>,
-    pub rent: Sysvar<'info, Rent>,
+    pub system_program: AccountInfo<'info>,
 }
 
 #[derive(Accounts)]
@@ -648,7 +668,7 @@ pub struct AccountsBid<'info> {
     pub bid_account: AccountInfo<'info>, // Essentially this is ProgramAccount<NFTBid>, however, we've not allocated the space for it yet. We cannot use ProgramAccount here.
 
     pub spl_program: AccountInfo<'info>,
-    pub system: AccountInfo<'info>,
+    pub system_program: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
 }
 
@@ -688,7 +708,7 @@ pub struct AccountsBorrow<'info> {
     pub loan_account: AccountInfo<'info>, // potentially not allocated
 
     pub spl_program: AccountInfo<'info>,
-    pub system: AccountInfo<'info>,
+    pub system_program: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
     pub clock: Sysvar<'info, Clock>,
 }
@@ -735,7 +755,7 @@ pub struct AccountsLiquidate<'info> {
 
     pub ata_program: AccountInfo<'info>,
     pub spl_program: AccountInfo<'info>,
-    pub system: AccountInfo<'info>,
+    pub system_program: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
     pub clock: Sysvar<'info, Clock>,
 }
@@ -804,4 +824,12 @@ pub struct EventLoanSettingChanged {
     service_fee_rate: u64,
     max_loan_duration: i64,
     mortgage_rate: u64,
+}
+
+#[event]
+#[derive(Debug)]
+pub struct EventNFTMortgaged {
+    mint: Pubkey,
+    from: Pubkey,
+    count: u64,
 }

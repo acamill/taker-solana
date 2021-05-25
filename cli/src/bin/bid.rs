@@ -62,8 +62,8 @@ fn main() -> Result<()> {
             )),
 
             spl_program: spl_token::id(),
+            system_program: system_program::id(),
             rent: sysvar::rent::id(),
-            system: system_program::id(),
         })
         .args(taker::instruction::Bid {
             price: opt.price,
