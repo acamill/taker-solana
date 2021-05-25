@@ -1,30 +1,41 @@
-use crate::{utils, AccountsInitialize, NFTPool, TakerError};
+use crate::{utils, DerivedAccountIdentifier, NFTPool, TakerError};
 use anchor_lang::prelude::*;
 use anchor_spl::token::Mint;
 use fehler::{throw, throws};
 
 type Result<T> = std::result::Result<T, ProgramError>;
 
-impl NFTPool {
-    pub fn new<'info>(
-        ctx: &Context<AccountsInitialize<'info>>,
-        bump: u8,
-    ) -> Result<ProgramAccount<'info, Self>> {
-        let accounts = &ctx.accounts;
-        let this = &accounts.pool;
+impl DerivedAccountIdentifier for NFTPool {
+    const SEED: &'static [u8] = b"TakerNFTPool";
+}
 
+impl NFTPool {
+    #[throws(ProgramError)]
+    pub fn new<'info>(
+        program_id: &Pubkey,
+        pool: &AccountInfo<'info>,
+        pool_owner: &AccountInfo<'info>,
+        tkr_mint: &CpiAccount<'info, Mint>,
+        tai_mint: &CpiAccount<'info, Mint>,
+        dai_mint: &CpiAccount<'info, Mint>,
+        rent: &Sysvar<'info, Rent>,
+        system_program: &AccountInfo<'info>,
+        bump: u8,
+    ) -> ProgramAccount<'info, Self> {
         let instance = Self {
             bump_seed: bump,
-            authority: *accounts.pool_owner.key,
-            tkr_mint: *accounts.tkr_mint.to_account_info().key,
-            tai_mint: *accounts.tai_mint.to_account_info().key,
-            dai_mint: *accounts.dai_mint.to_account_info().key,
-            deposit_incentive: 100 * 10u64.pow(accounts.tkr_mint.decimals as u32) as u64,
+            pool_owner: *pool_owner.key,
+            tkr_mint: *tkr_mint.to_account_info().key,
+            tai_mint: *tai_mint.to_account_info().key,
+            dai_mint: *dai_mint.to_account_info().key,
+            incentive: 100 * 10u64.pow(tkr_mint.decimals as u32) as u64,
             max_loan_duration: 30 * 24 * 60 * 60, // 30 days
             // 5%
             service_fee_rate: 500,
             // 1%
             interest_rate: 100,
+            // 90%
+            mortgage_rate: 9000,
         };
 
         let acc_size = 8 + instance
@@ -34,24 +45,23 @@ impl NFTPool {
 
         // allocate the space for the contract account
         utils::create_derived_account_with_seed(
-            ctx.program_id, // The program ID of Taker Contract
-            &accounts.pool_owner,
-            &this,
-            &[&[bump]],
+            program_id, // The program ID of Taker Contract
+            &pool_owner,
+            &pool,
+            &[Self::SEED, &[bump]],
             acc_size,
-            &accounts.rent,
-            &accounts.system,
+            &rent,
+            &system_program,
         )?;
 
         // let the data borrow invalid after exiting the scope. Otherwise can cannot borrow it again in the ProgramAccount::try_from
         {
-            let mut data = this.try_borrow_mut_data()?;
+            let mut data = pool.try_borrow_mut_data()?;
             let mut cursor = std::io::Cursor::new(&mut **data);
             instance.try_serialize(&mut cursor)?;
         }
 
-        let this = ProgramAccount::try_from(this)?;
-        Ok(this)
+        ProgramAccount::try_from(pool)?
     }
 
     pub fn ensure_pool_token_account<'info>(
@@ -110,12 +120,12 @@ impl NFTPool {
     }
 
     pub(crate) fn get_address_with_bump(program_id: &Pubkey) -> (Pubkey, u8) {
-        Pubkey::find_program_address(&[], program_id)
+        Pubkey::find_program_address(&[Self::SEED], program_id)
     }
 
     #[throws(ProgramError)]
     pub fn verify_address(program_id: &Pubkey, bump: u8, pool_address: &Pubkey) {
-        let addr = Pubkey::create_program_address(&[&[bump]], program_id)?;
+        let addr = Pubkey::create_program_address(&[Self::SEED, &[bump]], program_id)?;
 
         if &addr != pool_address {
             throw!(TakerError::ContractAddressNotCorrect);

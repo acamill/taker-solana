@@ -14,12 +14,8 @@ no-idl = []
 [dependencies]
 anchor-lang = "0.6"
 anchor-spl = "0.6"
-arrayref = "0.3"
 borsh = "0.8"
 fehler = "1"
-num-derive = "0.3"
-num-traits = "0.2"
-num_enum = "0.5"
 solana-program = "1.6"
 spl-associated-token-account = {version = "1", features = ["no-entrypoint"]}
 spl-token = {version = "3.1", features = ["no-entrypoint"]}

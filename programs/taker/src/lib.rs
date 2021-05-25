@@ -23,14 +23,15 @@ pub trait DerivedAccountIdentifier {
 #[derive(Debug)]
 pub struct NFTPool {
     pub bump_seed: u8,
-    pub authority: Pubkey,
+    pub pool_owner: Pubkey,
     pub tkr_mint: Pubkey,
     pub tai_mint: Pubkey,
     pub dai_mint: Pubkey,
-    pub deposit_incentive: u64,
-    pub max_loan_duration: i64,
-    pub service_fee_rate: u64, // in bp, one ten thousandth
-    pub interest_rate: u64,    // in bp, one ten thousandth
+    pub incentive: u64,         // incentive amount when user mortgage their NFT
+    pub max_loan_duration: i64, // max loan duration before liquidation
+    pub service_fee_rate: u64,  // in bp, one ten thousandth, fee rate charged by taker
+    pub interest_rate: u64,     // in bp, one ten thousandth
+    pub mortgage_rate: u64,     // in bp, mortgage rate to calculate real borrow amount
 }
 
 #[account]
@@ -61,38 +62,87 @@ pub mod taker {
     use super::*;
 
     pub fn initialize(ctx: Context<AccountsInitialize>) -> Result<()> {
+        let AccountsInitialize {
+            pool_owner,
+            pool,
+
+            tkr_mint,
+            tai_mint,
+            dai_mint,
+
+            pool_tkr_account,
+            pool_tai_account,
+            pool_dai_account,
+
+            ata_program,
+            spl_program,
+            system,
+            rent,
+        } = ctx.accounts;
+
         let (_, bump) = NFTPool::get_address_with_bump(ctx.program_id);
 
-        let accounts = &ctx.accounts;
+        NFTPool::verify_address(&ctx.program_id, bump, &pool.key)?;
 
-        NFTPool::verify_address(&ctx.program_id, bump, &accounts.pool.key)?;
-
-        let pool = NFTPool::new(&ctx, bump)?;
-
-        emit!(EventContractAllocated {
-            addr: *pool.to_account_info().key
-        });
+        let pool = NFTPool::new(
+            ctx.program_id,
+            pool,
+            pool_owner,
+            tkr_mint,
+            tai_mint,
+            dai_mint,
+            rent,
+            system,
+            bump,
+        )?;
 
         // Create accounts for this contract on tkr, tai and dai
         for (mint, token) in &[
-            (&accounts.dai_mint, &accounts.pool_dai_account),
-            (&accounts.tkr_mint, &accounts.pool_tkr_account),
-            (&accounts.tai_mint, &accounts.pool_tai_account),
+            (tkr_mint, pool_tkr_account),
+            (tai_mint, pool_tai_account),
+            (dai_mint, pool_dai_account),
         ] {
             utils::create_associated_token_account(
                 &pool.to_account_info(),
-                &accounts.pool_owner,
+                pool_owner,
                 mint,
                 token,
-                &accounts.ata_program,
-                &accounts.spl_program,
-                &accounts.system,
-                &accounts.rent,
+                ata_program,
+                spl_program,
+                system,
+                rent,
             )?;
         }
 
-        emit!(EventContractInitialized {});
+        emit!(EventContractAllocated {
+            account: *pool.to_account_info().key
+        });
+        Ok(())
+    }
 
+    pub fn change_loan_settings(
+        ctx: Context<AccountsChangeLoanSetting>,
+        incentive: Option<u64>,
+        interest_rate: Option<u64>,
+        service_fee_rate: Option<u64>,
+        max_loan_duration: Option<i64>,
+        mortgage_rate: Option<u64>,
+    ) -> Result<()> {
+        let pool = &mut ctx.accounts.pool;
+
+        incentive.map(|v| pool.incentive = v);
+        interest_rate.map(|v| pool.interest_rate = v);
+        service_fee_rate.map(|v| pool.service_fee_rate = v);
+        max_loan_duration.map(|v| pool.max_loan_duration = v);
+        mortgage_rate.map(|v| pool.mortgage_rate = v);
+
+        emit!(EventLoanSettingChanged {
+            incentive: pool.incentive,
+            interest_rate: pool.interest_rate,
+            service_fee_rate: pool.service_fee_rate,
+            max_loan_duration: pool.max_loan_duration,
+            mortgage_rate: pool.mortgage_rate,
+        });
         Ok(())
     }
 
@@ -166,7 +216,7 @@ pub mod taker {
                 },
                 &[&[&[pool.bump_seed]]],
             ),
-            count * pool.deposit_incentive,
+            count * pool.incentive,
         )?;
 
         // create the listing account if not created
@@ -532,6 +582,13 @@ pub struct AccountsInitialize<'info> {
     pub system: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
 }
+#[derive(Accounts)]
+pub struct AccountsChangeLoanSetting<'info> {
+    #[account(signer)]
+    pub pool_owner: AccountInfo<'info>,
+    #[account(mut, has_one = pool_owner)]
+    pub pool: ProgramAccount<'info, NFTPool>,
+}
 
 #[derive(Accounts)]
 pub struct AccountsDepositNFT<'info> {
@@ -735,10 +792,16 @@ pub enum TakerError {
 
 #[event]
 #[derive(Debug)]
-pub struct EventContractInitialized {}
+pub struct EventContractAllocated {
+    account: Pubkey,
+}
 
 #[event]
 #[derive(Debug)]
-pub struct EventContractAllocated {
-    addr: Pubkey,
+pub struct EventLoanSettingChanged {
+    incentive: u64,
+    interest_rate: u64,
+    service_fee_rate: u64,
+    max_loan_duration: i64,
+    mortgage_rate: u64,
 }

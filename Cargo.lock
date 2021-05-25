@@ -3579,12 +3579,8 @@ version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "anchor-spl",
- "arrayref",
  "borsh",
  "fehler",
- "num-derive",
- "num-traits",
- "num_enum",
  "solana-program",
  "solana-sdk",
  "spl-associated-token-account",
