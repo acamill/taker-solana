@@ -2,10 +2,10 @@ use anchor_client::{Client, Cluster};
 use anyhow::Result;
 use cli::{load_program_from_idl, Keypair};
 use rand::rngs::OsRng;
-use solana_sdk::{pubkey::Pubkey, signature::Signer, system_program, sysvar};
+use solana_sdk::{pubkey::Pubkey, signature::Signer, sysvar};
 use spl_associated_token_account::get_associated_token_address;
 use structopt::StructOpt;
-use taker::{NFTBid, NFTListing, NFTLoan, NFTPool};
+use taker::{NFTBid, NFTDeposit, NFTPool};
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
@@ -20,10 +20,16 @@ struct Opt {
     lender_wallet_address: Pubkey,
 
     #[structopt(long, env)]
+    tai_mint_address: Pubkey,
+
+    #[structopt(long, env)]
     dai_mint_address: Pubkey,
 
     #[structopt(long, env)]
     nft_mint_address: Pubkey,
+
+    #[structopt(long, env)]
+    deposit_id: Pubkey,
 }
 
 fn main() -> Result<()> {
@@ -57,34 +63,30 @@ fn main() -> Result<()> {
                 &opt.lender_wallet_address,
                 &opt.dai_mint_address
             )),
+            pool_dai_account: dbg!(get_associated_token_address(&pool, &opt.dai_mint_address)),
 
-            loan_account: dbg!(NFTLoan::get_address(
+            lender_tai_account: dbg!(get_associated_token_address(
+                &opt.lender_wallet_address,
+                &opt.tai_mint_address
+            )),
+            pool_tai_account: dbg!(get_associated_token_address(&pool, &opt.tai_mint_address)),
+
+            deposit_account: dbg!(NFTDeposit::get_address(
                 &program_id,
                 &opt.nft_mint_address,
                 &opt.borrower_wallet_keypair.pubkey(),
-                &opt.lender_wallet_address,
-                &loan_id,
+                &opt.deposit_id,
             )),
             bid_account: dbg!(NFTBid::get_address(
                 &program_id,
                 &opt.nft_mint_address,
                 &opt.lender_wallet_address,
             )),
-            listing_account: dbg!(NFTListing::get_address(
-                &program_id,
-                &opt.nft_mint_address,
-                &opt.borrower_wallet_keypair.pubkey(),
-            )),
 
             spl_program: spl_token::id(),
-            system_program: system_program::id(),
-            rent: sysvar::rent::id(),
             clock: sysvar::clock::id(),
         })
-        .args(taker::instruction::Borrow {
-            loan_id,
-            amount: 10,
-        })
+        .args(taker::instruction::Borrow { amount: 1 })
         .signer(&opt.borrower_wallet_keypair.clone().0)
         .send()?;
 

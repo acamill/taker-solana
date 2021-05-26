@@ -1,11 +1,11 @@
 use anchor_client::{Client, Cluster};
 use anyhow::Result;
 use cli::{load_program_from_idl, Keypair};
+use rand::rngs::OsRng;
 use solana_sdk::{pubkey::Pubkey, signature::Signer, system_program, sysvar};
 use spl_associated_token_account::get_associated_token_address;
 use structopt::StructOpt;
-use taker::NFTListing;
-use taker::NFTPool;
+use taker::{NFTDeposit, NFTPool};
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
@@ -36,6 +36,8 @@ fn main() -> Result<()> {
 
     let pool = NFTPool::get_address(&program.id());
 
+    let deposit_id = solana_sdk::signature::Keypair::generate(&mut OsRng).pubkey();
+
     let tx = program
         .request()
         .accounts(taker::accounts::AccountsDepositNFT {
@@ -56,10 +58,11 @@ fn main() -> Result<()> {
                 &opt.tkr_mint_address
             )),
 
-            listing_account: dbg!(NFTListing::get_address(
+            deposit_account: dbg!(NFTDeposit::get_address(
                 &program_id,
                 &opt.nft_mint_address,
                 &opt.borrower_wallet_keypair.pubkey(),
+                &deposit_id
             )),
 
             ata_program: spl_associated_token_account::id(),
@@ -67,7 +70,7 @@ fn main() -> Result<()> {
             rent: sysvar::rent::id(),
             system_program: system_program::id(),
         })
-        .args(taker::instruction::DepositNft { count: 1 })
+        .args(taker::instruction::DepositNft { deposit_id })
         .signer(&*opt.borrower_wallet_keypair)
         .send()?;
 

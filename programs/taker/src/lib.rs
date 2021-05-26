@@ -1,8 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod nft_bid;
-mod nft_listing;
-mod nft_loan;
+mod nft_deposit;
 mod nft_pool;
 mod utils;
 
@@ -11,8 +10,8 @@ use std::u64;
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, TokenAccount};
 use fehler::throw;
-use nft_loan::LoanState;
-use solana_program::{clock::UnixTimestamp, pubkey::Pubkey};
+use nft_deposit::DepositState;
+use solana_program::pubkey::Pubkey;
 
 pub trait DerivedAccountIdentifier {
     const SEED: &'static [u8];
@@ -23,7 +22,7 @@ pub trait DerivedAccountIdentifier {
 #[derive(Debug)]
 pub struct NFTPool {
     pub bump_seed: u8,
-    pub pool_owner: Pubkey,
+    pub owner: Pubkey,
     pub tkr_mint: Pubkey,
     pub tai_mint: Pubkey,
     pub dai_mint: Pubkey,
@@ -36,25 +35,17 @@ pub struct NFTPool {
 
 #[account]
 #[derive(Debug)]
-pub struct NFTListing {
-    pub count: u64,
-    pub available: u64, // how many are available to be withdrawn or used as collateral
-}
-
-#[account]
-#[derive(Debug)]
 pub struct NFTBid {
     pub price: u64, // DAI Price
     pub qty: u64,
 }
 
+// One NFTDeposit corresponds to one token
 #[account]
 #[derive(Debug)]
-pub struct NFTLoan {
-    cash: u64,                 // amount of dai
-    started_at: UnixTimestamp, // in seconds
-    expired_at: UnixTimestamp, // in seconds
-    state: LoanState,
+pub struct NFTDeposit {
+    deposit_id: Pubkey,
+    state: DepositState,
 }
 
 #[program]
@@ -148,11 +139,7 @@ pub mod taker {
     }
 
     // Deposits NFT asset into the pool, creating an entry of NFTListing
-    pub fn deposit_nft(ctx: Context<AccountsDepositNFT>, count: u64) -> Result<()> {
-        if count == 0 {
-            return Ok(());
-        }
-
+    pub fn deposit_nft(ctx: Context<AccountsDepositNFT>, deposit_id: Pubkey) -> Result<()> {
         let AccountsDepositNFT {
             pool,
             borrower_wallet_account,
@@ -165,7 +152,7 @@ pub mod taker {
             pool_tkr_account,
             user_tkr_account,
 
-            listing_account,
+            deposit_account: loan_account,
 
             rent,
 
@@ -211,10 +198,10 @@ pub mod taker {
                     authority: borrower_wallet_account.clone(),
                 },
             ),
-            count,
+            1,
         )?;
 
-        // Transfer incentive to the borrower
+        // Transfer incentive TKR to the borrower
         anchor_spl::token::transfer(
             CpiContext::new_with_signer(
                 spl_program.clone(),
@@ -225,35 +212,33 @@ pub mod taker {
                 },
                 &[&[NFTPool::SEED, &[pool.bump_seed]]],
             ),
-            count * pool.incentive,
+            pool.incentive,
         )?;
 
-        // create the listing account if not created
-        let mut listing = NFTListing::ensure(
+        // create the loan account if not created
+        let deposit_account = NFTDeposit::deposit(
             ctx.program_id,
+            &deposit_id,
             nft_mint.to_account_info().key,
             borrower_wallet_account,
-            listing_account,
+            loan_account,
             rent,
             system_program,
         )?;
-        listing.deposit(count);
 
         // Persistent back the data. Since we created the ProgramAccount by ourselves, we need to do this manually.
-        listing.exit(ctx.program_id)?;
+        deposit_account.exit(ctx.program_id)?;
 
         emit!(EventNFTDeposited {
             mint: *nft_mint.to_account_info().key,
             from: *borrower_wallet_account.key,
-            count: count,
-            total: listing.count,
         });
 
         Ok(())
     }
 
     // withdraw the deposited NFT
-    pub fn withdraw_nft(ctx: Context<AccountsWithdrawNFT>, count: u64) -> Result<()> {
+    pub fn withdraw_nft(ctx: Context<AccountsWithdrawNFT>, deposit_id: Pubkey) -> Result<()> {
         // TODO: Do we set the minimal nft lock in time?
         let AccountsWithdrawNFT {
             pool,
@@ -261,26 +246,28 @@ pub mod taker {
             nft_mint,
             borrower_nft_account,
             pool_nft_account,
-            listing_account,
+            deposit_account,
             spl_program,
         } = ctx.accounts;
 
         // verify the listing account indeed belongs to the user
-        let (_, bump) = NFTListing::get_address_with_bump(
+        let (_, bump) = NFTDeposit::get_address_with_bump(
             ctx.program_id,
             nft_mint.to_account_info().key,
             borrower_wallet_account.key,
+            &deposit_id,
         );
-        NFTListing::verify_address(
+        NFTDeposit::verify_address(
             ctx.program_id,
             nft_mint.to_account_info().key,
             borrower_wallet_account.key,
+            &deposit_id,
             bump,
-            listing_account.to_account_info().key,
+            deposit_account.to_account_info().key,
         )?;
 
         // withdraw also verifies the count
-        listing_account.withdraw(count)?;
+        deposit_account.withdraw()?;
 
         // transfer the NFT back to the user
         anchor_spl::token::transfer(
@@ -293,14 +280,12 @@ pub mod taker {
                 },
                 &[&[NFTPool::SEED, &[pool.bump_seed]]],
             ),
-            count,
+            1,
         )?;
 
         emit!(EventNFTWithdrawn {
             mint: *nft_mint.to_account_info().key,
             to: *borrower_wallet_account.key,
-            count: count,
-            total: listing_account.count,
         });
 
         Ok(())
@@ -417,61 +402,120 @@ pub mod taker {
         Ok(())
     }
 
-    pub fn borrow(ctx: Context<AccountsBorrow>, loan_id: Pubkey, amount: u64) -> Result<()> {
+    pub fn borrow(ctx: Context<AccountsBorrow>, amount: u64) -> Result<()> {
         let AccountsBorrow {
             pool,
             borrower_wallet_account,
             lender_wallet_account,
+
             nft_mint,
+
+            pool_dai_account,
             borrower_dai_account,
             lender_dai_account,
+
+            pool_tai_account,
+            lender_tai_account,
+
             bid_account,
-            listing_account,
-            loan_account,
+            deposit_account,
+
             spl_program,
-            system_program: system,
-            rent,
             clock,
         } = ctx.accounts;
 
         if amount > bid_account.price {
-            throw!(TakerError::NFTBorrowExceedBid)
+            throw!(TakerError::NFTBorrowExceedBidAmount)
         }
+
+        assert_eq!(lender_tai_account.mint, pool.tai_mint);
+        assert_eq!(pool_tai_account.mint, pool.tai_mint);
+        assert_eq!(lender_dai_account.mint, pool.dai_mint);
+        assert_eq!(borrower_dai_account.mint, pool.dai_mint);
+
+        let (_, bump) = NFTDeposit::get_address_with_bump(
+            ctx.program_id,
+            nft_mint.to_account_info().key,
+            borrower_wallet_account.key,
+            &deposit_account.deposit_id,
+        );
+
+        NFTDeposit::verify_address(
+            ctx.program_id,
+            nft_mint.to_account_info().key,
+            borrower_wallet_account.key,
+            &deposit_account.deposit_id,
+            bump,
+            deposit_account.to_account_info().key,
+        )?;
+
+        // set related records
+        let total_amount = amount;
+        let lent_amount = total_amount
+            .checked_mul(pool.mortgage_rate)
+            .unwrap()
+            .checked_mul(10000)
+            .unwrap();
+
+        deposit_account.start_borrow(
+            *lender_wallet_account.key,
+            total_amount,
+            lent_amount,
+            clock.unix_timestamp,
+            pool.max_loan_duration,
+        )?;
+
+        // decrease the bid qty by 1;
+        bid_account.trade(1)?;
+
+        // transfer DAI to the pool
+        anchor_spl::token::transfer(
+            CpiContext::new(
+                spl_program.clone(),
+                anchor_spl::token::Transfer {
+                    from: lender_dai_account.to_account_info(),
+                    to: pool_dai_account.to_account_info(),
+                    authority: lender_wallet_account.to_account_info(), // The pool is the delegate
+                },
+            ),
+            total_amount,
+        )?;
 
         // transfer DAI to the borrower
         anchor_spl::token::transfer(
             CpiContext::new_with_signer(
                 spl_program.clone(),
                 anchor_spl::token::Transfer {
-                    from: lender_dai_account.to_account_info(),
+                    from: pool_dai_account.to_account_info(),
                     to: borrower_dai_account.to_account_info(),
                     authority: pool.to_account_info(), // The pool is the delegate
                 },
                 &[&[NFTPool::SEED, &[pool.bump_seed]]],
             ),
-            amount,
+            lent_amount,
         )?;
 
-        // decrease the bid qty by 1;
-        bid_account.trade(1)?;
-        // descrease the availability by 1
-        listing_account.borrow_success()?;
-
-        let loan_account = NFTLoan::start_borrow(
-            ctx.program_id,
-            &loan_id,
-            nft_mint.to_account_info().key,
-            borrower_wallet_account,
-            lender_wallet_account,
-            loan_account,
-            rent,
-            system,
-            amount,
-            clock.unix_timestamp,
-            pool.max_loan_duration,
+        // transfer TAI to the lender
+        anchor_spl::token::transfer(
+            CpiContext::new_with_signer(
+                spl_program.clone(),
+                anchor_spl::token::Transfer {
+                    from: pool_tai_account.to_account_info(),
+                    to: lender_tai_account.to_account_info(),
+                    authority: pool.to_account_info(), // The pool is the delegate
+                },
+                &[&[NFTPool::SEED, &[pool.bump_seed]]],
+            ),
+            lent_amount,
         )?;
 
-        loan_account.exit(ctx.program_id)?; // manually exit for data persistent
+        emit!(EventBorrowed {
+            borrower: *borrower_wallet_account.key,
+            lender: *lender_wallet_account.key,
+            amount: lent_amount,
+            length: pool.max_loan_duration
+        });
+
         Ok(())
     }
 
@@ -479,22 +523,61 @@ pub mod taker {
         let AccountsRepay {
             pool,
             borrower_wallet_account,
+            pool_owner_dai_account,
             borrower_dai_account,
             lender_dai_account,
-            pool_dai_account,
-            listing_account,
-            loan_account,
+
+            borrower_nft_account,
+            pool_nft_account,
+
+            deposit_account,
             spl_program,
             clock,
         } = ctx.accounts;
 
-        if clock.unix_timestamp > loan_account.expired_at
-            || matches!(loan_account.state, LoanState::Liquidated)
-        {
+        let (started_at, expired_at, lent_amount) = match deposit_account.state {
+            DepositState::PendingLoan => throw!(TakerError::LoanNotActive),
+            DepositState::LoanActive {
+                expired_at,
+                lent_amount,
+                started_at,
+                ..
+            } => (started_at, expired_at, lent_amount),
+            DepositState::LoanLiquidated => {
+                throw!(TakerError::LoanLiquidated)
+            }
+            DepositState::LoanRepayed { .. } | DepositState::Withdrawn => {
+                throw!(TakerError::LoanNotActive)
+            }
+        };
+
+        if clock.unix_timestamp > expired_at {
             throw!(TakerError::LoanLiquidated)
         }
 
-        // transfer DAI to the lender with interest
+        assert!(pool_owner_dai_account.owner == pool.owner);
+
+        let (interest, fee) = pool.calculate_interest_and_fee(
+            lent_amount,
+            clock.unix_timestamp.saturating_sub(started_at),
+        );
+
+        // transfer fee to the owner
+        anchor_spl::token::transfer(
+            CpiContext::new(
+                spl_program.clone(),
+                anchor_spl::token::Transfer {
+                    from: borrower_dai_account.to_account_info(),
+                    to: pool_owner_dai_account.to_account_info(),
+                    authority: borrower_wallet_account.to_account_info(),
+                },
+            ),
+            fee,
+        )?;
+
+        let lender_income = interest.checked_sub(fee).unwrap();
+
+        // transfer the DAI to the pool, waiting for the lender to withdraw
         anchor_spl::token::transfer(
             CpiContext::new(
                 spl_program.clone(),
@@ -504,39 +587,25 @@ pub mod taker {
                     authority: borrower_wallet_account.to_account_info(),
                 },
             ),
-            loan_account
-                .cash
-                .checked_add(
-                    loan_account
-                        .cash
-                        .checked_mul(pool.interest_rate)
-                        .unwrap()
-                        .checked_div(10000)
-                        .unwrap(),
-                )
-                .unwrap(),
+            lent_amount.checked_add(lender_income).unwrap(),
         )?;
 
+        // transfer the NFT to the borrower
         anchor_spl::token::transfer(
-            CpiContext::new(
+            CpiContext::new_with_signer(
                 spl_program.clone(),
                 anchor_spl::token::Transfer {
-                    from: borrower_dai_account.to_account_info(),
-                    to: pool_dai_account.to_account_info(),
-                    authority: borrower_wallet_account.to_account_info(),
+                    from: pool_nft_account.to_account_info(),
+                    to: borrower_nft_account.to_account_info(),
+                    authority: pool.to_account_info(),
                 },
+                &[&[NFTPool::SEED, &[pool.bump_seed]]],
             ),
-            loan_account
-                .cash
-                .checked_mul(pool.service_fee_rate)
-                .unwrap()
-                .checked_div(10000)
-                .unwrap(),
+            1,
         )?;
 
         // set corresponding records
-        loan_account.repay()?;
-        listing_account.repay_success();
+        deposit_account.repay(lent_amount.checked_add(lender_income).unwrap())?;
 
         Ok(())
     }
@@ -546,27 +615,75 @@ pub mod taker {
             pool,
             lender_wallet_account,
 
+            pool_owner_dai_account,
+            pool_dai_account,
+            lender_dai_account,
+
             nft_mint,
             pool_nft_account,
             lender_nft_account,
 
-            listing_account,
-            loan_account,
+            deposit_account,
 
             ata_program,
             spl_program,
-            system_program: system,
+            system_program,
             rent,
             clock,
         } = ctx.accounts;
 
-        if !matches!(loan_account.state, LoanState::Active) {
-            throw!(TakerError::LoanNotActive)
-        }
+        let (expired_at, total_amount, lent_amount) = match deposit_account.state {
+            DepositState::PendingLoan => throw!(TakerError::LoanNotActive),
+            DepositState::LoanActive {
+                total_amount,
+                lent_amount,
+                expired_at,
+                ..
+            } => (expired_at, total_amount, lent_amount),
+            DepositState::LoanLiquidated => {
+                throw!(TakerError::LoanLiquidated)
+            }
+            DepositState::LoanRepayed { .. } | DepositState::Withdrawn => {
+                throw!(TakerError::LoanNotActive)
+            }
+        };
 
-        if clock.unix_timestamp <= loan_account.expired_at {
+        if clock.unix_timestamp <= expired_at {
             throw!(TakerError::LoanNotExpired)
         }
+
+        // charge service fee using max_borrow_duration
+        let (_, fee) = pool.calculate_interest_and_fee(lent_amount, pool.max_loan_duration);
+
+        // transfer fee to the owner
+        anchor_spl::token::transfer(
+            CpiContext::new_with_signer(
+                spl_program.clone(),
+                anchor_spl::token::Transfer {
+                    from: pool_dai_account.to_account_info(),
+                    to: pool_owner_dai_account.to_account_info(),
+                    authority: pool.to_account_info(),
+                },
+                &[&[NFTPool::SEED, &[pool.bump_seed]]],
+            ),
+            fee,
+        )?;
+
+        let withdrawable = total_amount - lent_amount - fee;
+
+        // Transfer the remaining DAI to the lender
+        anchor_spl::token::transfer(
+            CpiContext::new_with_signer(
+                spl_program.clone(),
+                anchor_spl::token::Transfer {
+                    from: pool_dai_account.to_account_info(),
+                    to: lender_dai_account.to_account_info(),
+                    authority: pool.to_account_info(),
+                },
+                &[&[NFTPool::SEED, &[pool.bump_seed]]],
+            ),
+            withdrawable,
+        )?;
 
         // allocate the NFT ATA for the lender if not allocate
         NFTPool::ensure_user_token_account(
@@ -575,7 +692,7 @@ pub mod taker {
             lender_nft_account,
             ata_program,
             spl_program,
-            system,
+            system_program,
             rent,
         )?;
 
@@ -593,8 +710,12 @@ pub mod taker {
         )?;
 
         // set corresponding records
-        loan_account.liquidate()?;
-        listing_account.liquidate(1)?;
+        deposit_account.liquidate()?;
+
+        emit!(EventLiquidated {
+            lender: *lender_wallet_account.key,
+            loan_id: deposit_account.deposit_id,
+        });
 
         Ok(())
     }
@@ -626,8 +747,8 @@ pub struct AccountsInitialize<'info> {
 #[derive(Accounts)]
 pub struct AccountsChangeLoanSetting<'info> {
     #[account(signer)]
-    pub pool_owner: AccountInfo<'info>,
-    #[account(mut, has_one = pool_owner)]
+    pub owner: AccountInfo<'info>,
+    #[account(mut, has_one = owner)]
     pub pool: ProgramAccount<'info, NFTPool>,
 }
 
@@ -651,7 +772,7 @@ pub struct AccountsDepositNFT<'info> {
     pub user_tkr_account: AccountInfo<'info>, // potentially this is not allocated yet
 
     #[account(mut)]
-    pub listing_account: AccountInfo<'info>, // Essentially this is ProgramAccount<NFTListing>, however, we've not allocated the space for it yet. We cannot use ProgramAccount here.
+    pub deposit_account: AccountInfo<'info>, // Essentially this is ProgramAccount<NFTDeposit>, however, we've not allocated the space for it yet. We cannot use ProgramAccount here.
 
     pub rent: Sysvar<'info, Rent>,
 
@@ -673,7 +794,7 @@ pub struct AccountsWithdrawNFT<'info> {
     pub borrower_nft_account: CpiAccount<'info, TokenAccount>,
 
     #[account(mut)]
-    pub listing_account: ProgramAccount<'info, NFTListing>,
+    pub deposit_account: ProgramAccount<'info, NFTDeposit>,
 
     pub spl_program: AccountInfo<'info>,
 }
@@ -719,42 +840,51 @@ pub struct AccountsBorrow<'info> {
     pub lender_wallet_account: AccountInfo<'info>,
 
     pub nft_mint: CpiAccount<'info, Mint>,
+
+    #[account(mut)]
+    pub pool_dai_account: CpiAccount<'info, TokenAccount>,
     #[account(mut)]
     pub borrower_dai_account: CpiAccount<'info, TokenAccount>,
     #[account(mut)]
     pub lender_dai_account: CpiAccount<'info, TokenAccount>,
 
     #[account(mut)]
-    pub listing_account: ProgramAccount<'info, NFTListing>,
+    pub lender_tai_account: CpiAccount<'info, TokenAccount>,
+    #[account(mut)]
+    pub pool_tai_account: CpiAccount<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub deposit_account: ProgramAccount<'info, NFTDeposit>,
     #[account(mut)]
     pub bid_account: ProgramAccount<'info, NFTBid>,
-    #[account(mut)]
-    pub loan_account: AccountInfo<'info>, // potentially not allocated
 
     pub spl_program: AccountInfo<'info>,
-    pub system_program: AccountInfo<'info>,
-    pub rent: Sysvar<'info, Rent>,
     pub clock: Sysvar<'info, Clock>,
 }
 
 #[derive(Accounts)]
 pub struct AccountsRepay<'info> {
     pub pool: ProgramAccount<'info, NFTPool>,
+
     #[account(signer)]
     pub borrower_wallet_account: AccountInfo<'info>,
 
     #[account(mut)]
+    pub pool_owner_dai_account: CpiAccount<'info, TokenAccount>, // for collecting fees
+    #[account(mut)]
     pub borrower_dai_account: CpiAccount<'info, TokenAccount>,
     #[account(mut)]
     pub lender_dai_account: CpiAccount<'info, TokenAccount>,
-    #[account(mut)]
-    pub pool_dai_account: CpiAccount<'info, TokenAccount>,
 
     #[account(mut)]
-    pub listing_account: ProgramAccount<'info, NFTListing>,
+    pub borrower_nft_account: CpiAccount<'info, TokenAccount>,
     #[account(mut)]
-    pub loan_account: ProgramAccount<'info, NFTLoan>,
+    pub pool_nft_account: CpiAccount<'info, TokenAccount>,
 
+    #[account(mut)]
+    pub deposit_account: ProgramAccount<'info, NFTDeposit>,
+
+    #[account(mut)]
     pub spl_program: AccountInfo<'info>,
     pub clock: Sysvar<'info, Clock>,
 }
@@ -762,9 +892,15 @@ pub struct AccountsRepay<'info> {
 #[derive(Accounts)]
 pub struct AccountsLiquidate<'info> {
     pub pool: ProgramAccount<'info, NFTPool>,
-
     #[account(signer)]
     pub lender_wallet_account: AccountInfo<'info>,
+
+    #[account(mut)]
+    pub pool_dai_account: CpiAccount<'info, TokenAccount>,
+    #[account(mut)]
+    pub pool_owner_dai_account: CpiAccount<'info, TokenAccount>,
+    #[account(mut)]
+    pub lender_dai_account: CpiAccount<'info, TokenAccount>,
 
     pub nft_mint: CpiAccount<'info, Mint>,
     #[account(mut)]
@@ -773,9 +909,7 @@ pub struct AccountsLiquidate<'info> {
     pub lender_nft_account: AccountInfo<'info>, // Possibly not allocated
 
     #[account(mut)]
-    pub listing_account: ProgramAccount<'info, NFTListing>,
-    #[account(mut)]
-    pub loan_account: ProgramAccount<'info, NFTLoan>,
+    pub deposit_account: ProgramAccount<'info, NFTDeposit>,
 
     pub ata_program: AccountInfo<'info>,
     pub spl_program: AccountInfo<'info>,
@@ -813,7 +947,7 @@ pub enum TakerError {
     NFTBidQtyLargerThanSupply,
 
     #[msg("NFT borrow amount larger than bid amount")]
-    NFTBorrowExceedBid,
+    NFTBorrowExceedBidAmount,
 
     #[msg("NFT borrow already started")]
     BorrowAlreadyStarted,
@@ -832,6 +966,15 @@ pub enum TakerError {
 
     #[msg("Loan is not active")]
     LoanNotActive,
+
+    #[msg("Not enough NFT in pool")]
+    NotEnoughNFTInPool,
+
+    #[msg("NFT already withdrawn")]
+    NFTAlreadyWithdrawn,
+
+    #[msg("NFT is locked")]
+    NFTLocked,
 }
 
 #[event]
@@ -855,8 +998,6 @@ pub struct EventLoanSettingChanged {
 pub struct EventNFTDeposited {
     mint: Pubkey,
     from: Pubkey,
-    count: u64,
-    total: u64,
 }
 
 #[event]
@@ -864,8 +1005,6 @@ pub struct EventNFTDeposited {
 pub struct EventNFTWithdrawn {
     mint: Pubkey,
     to: Pubkey,
-    count: u64,
-    total: u64,
 }
 
 #[event]
@@ -884,4 +1023,20 @@ pub struct EventNFTBidCancelled {
     from: Pubkey,
     price: u64,
     qty: u64,
+}
+
+#[event]
+#[derive(Debug)]
+pub struct EventBorrowed {
+    borrower: Pubkey,
+    lender: Pubkey,
+    amount: u64,
+    length: i64,
+}
+
+#[event]
+#[derive(Debug)]
+pub struct EventLiquidated {
+    lender: Pubkey,
+    loan_id: Pubkey,
 }

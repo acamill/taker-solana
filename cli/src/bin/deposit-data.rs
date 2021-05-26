@@ -3,7 +3,7 @@ use anyhow::Result;
 use rand::rngs::OsRng;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair};
 use structopt::StructOpt;
-use taker::NFTLoan;
+use taker::NFTDeposit;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
@@ -21,7 +21,7 @@ struct Opt {
     lender_wallet_address: Pubkey,
 
     #[structopt(long, env)]
-    loan_id: Pubkey,
+    deposit_id: Pubkey,
 }
 
 fn main() -> Result<()> {
@@ -32,20 +32,19 @@ fn main() -> Result<()> {
         .taker_program_address
         .unwrap_or_else(cli::load_program_from_idl);
 
-    let loan_account = NFTLoan::get_address(
+    let deposit_account = NFTDeposit::get_address(
         &program_id,
         &opt.nft_mint_address,
         &opt.borrower_wallet_address,
-        &opt.lender_wallet_address,
-        &opt.loan_id,
+        &opt.deposit_id,
     );
 
     let client = Client::new(Cluster::Devnet, Keypair::generate(&mut OsRng));
     let program = client.program(program_id);
 
-    let content: taker::NFTLoan = program.account(loan_account)?;
+    let content: NFTDeposit = program.account(deposit_account)?;
 
-    println!("Loan: {:?}", content);
+    println!("Deposit: {:?}", content);
 
     Ok(())
 }

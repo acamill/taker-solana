@@ -4,7 +4,7 @@ use cli::{load_program_from_idl, Keypair};
 use solana_sdk::{pubkey::Pubkey, signature::Signer};
 use spl_associated_token_account::get_associated_token_address;
 use structopt::StructOpt;
-use taker::{NFTListing, NFTPool};
+use taker::{NFTDeposit, NFTPool};
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
@@ -13,10 +13,13 @@ struct Opt {
     taker_program_address: Option<Pubkey>,
 
     #[structopt(long, env)]
-    taker_user: Keypair,
+    borrower_wallet_keypair: Keypair,
 
     #[structopt(long, env)]
     nft_mint_address: Pubkey,
+
+    #[structopt(long, env)]
+    deposit_id: Pubkey,
 }
 
 fn main() -> Result<()> {
@@ -27,9 +30,9 @@ fn main() -> Result<()> {
         .taker_program_address
         .unwrap_or_else(load_program_from_idl);
 
-    let taker_user = &opt.taker_user;
+    let borrower_wallet_keypair = &opt.borrower_wallet_keypair;
 
-    let client = Client::new(Cluster::Devnet, taker_user.clone().0);
+    let client = Client::new(Cluster::Devnet, borrower_wallet_keypair.clone().0);
     let program = client.program(program_id);
 
     let pool = NFTPool::get_address(&program.id());
@@ -38,25 +41,28 @@ fn main() -> Result<()> {
         .request()
         .accounts(taker::accounts::AccountsWithdrawNFT {
             pool,
-            borrower_wallet_account: taker_user.pubkey(),
+            borrower_wallet_account: borrower_wallet_keypair.pubkey(),
 
             nft_mint: opt.nft_mint_address,
             borrower_nft_account: dbg!(get_associated_token_address(
-                &taker_user.pubkey(),
+                &borrower_wallet_keypair.pubkey(),
                 &opt.nft_mint_address
             )),
             pool_nft_account: dbg!(get_associated_token_address(&pool, &opt.nft_mint_address)),
 
-            listing_account: dbg!(NFTListing::get_address(
+            deposit_account: dbg!(NFTDeposit::get_address(
                 &program_id,
                 &opt.nft_mint_address,
-                &taker_user.pubkey(),
+                &borrower_wallet_keypair.pubkey(),
+                &opt.deposit_id
             )),
 
             spl_program: spl_token::id(),
         })
-        .args(taker::instruction::WithdrawNft { count: 1 })
-        .signer(&**taker_user)
+        .args(taker::instruction::WithdrawNft {
+            deposit_id: opt.deposit_id,
+        })
+        .signer(&**borrower_wallet_keypair)
         .send()?;
 
     println!("The transaction is {}", tx);

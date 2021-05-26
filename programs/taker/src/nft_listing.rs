@@ -1,6 +1,6 @@
 use anchor_lang::prelude::Pubkey;
 
-use crate::{utils, DerivedAccountIdentifier, NFTListing, TakerError};
+use crate::{utils, DerivedAccountIdentifier, TakerError};
 use anchor_lang::prelude::*;
 use fehler::{throw, throws};
 

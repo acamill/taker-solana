@@ -2,6 +2,9 @@ use crate::{utils, DerivedAccountIdentifier, NFTPool, TakerError};
 use anchor_lang::prelude::*;
 use anchor_spl::token::Mint;
 use fehler::{throw, throws};
+use std::convert::TryInto;
+
+static SECONDS_PER_DAY: u64 = 24 * 60 * 60;
 
 type Result<T> = std::result::Result<T, ProgramError>;
 
@@ -24,7 +27,7 @@ impl NFTPool {
     ) -> ProgramAccount<'info, Self> {
         let instance = Self {
             bump_seed: bump,
-            pool_owner: *pool_owner.key,
+            owner: *pool_owner.key,
             tkr_mint: *tkr_mint.to_account_info().key,
             tai_mint: *tai_mint.to_account_info().key,
             dai_mint: *dai_mint.to_account_info().key,
@@ -115,6 +118,24 @@ impl NFTPool {
         Ok(())
     }
 
+    pub fn calculate_interest_and_fee(&self, borrowed_amount: u64, duration: i64) -> (u64, u64) {
+        let interest = borrowed_amount
+            .checked_mul(self.interest_rate)
+            .unwrap()
+            .checked_mul(duration.try_into().unwrap())
+            .unwrap()
+            .checked_div(SECONDS_PER_DAY)
+            .unwrap()
+            .checked_div(10000)
+            .unwrap();
+        let fee = interest
+            .checked_mul(self.service_fee_rate)
+            .unwrap()
+            .checked_div(10000)
+            .unwrap();
+
+        (interest, fee)
+    }
     pub fn get_address(program_id: &Pubkey) -> Pubkey {
         Self::get_address_with_bump(program_id).0
     }

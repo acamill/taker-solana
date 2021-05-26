@@ -4,13 +4,16 @@ use cli::{load_program_from_idl, Keypair};
 use solana_sdk::{pubkey::Pubkey, signature::Signer, sysvar};
 use spl_associated_token_account::get_associated_token_address;
 use structopt::StructOpt;
-use taker::{NFTListing, NFTLoan, NFTPool};
+use taker::{NFTDeposit, NFTPool};
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
 struct Opt {
     #[structopt(long, env, short = "p")]
     taker_program_address: Option<Pubkey>,
+
+    #[structopt(long, env)]
+    taker_authority_address: Pubkey,
 
     #[structopt(long, env)]
     borrower_wallet_keypair: Keypair,
@@ -47,6 +50,10 @@ fn main() -> Result<()> {
             pool,
             borrower_wallet_account: opt.borrower_wallet_keypair.pubkey(),
 
+            pool_owner_dai_account: dbg!(get_associated_token_address(
+                &opt.taker_authority_address,
+                &opt.dai_mint_address
+            )),
             borrower_dai_account: dbg!(get_associated_token_address(
                 &opt.borrower_wallet_keypair.pubkey(),
                 &opt.dai_mint_address
@@ -55,19 +62,18 @@ fn main() -> Result<()> {
                 &opt.lender_wallet_address,
                 &opt.dai_mint_address
             )),
-            pool_dai_account: dbg!(get_associated_token_address(&pool, &opt.dai_mint_address)),
 
-            loan_account: dbg!(NFTLoan::get_address(
-                &program_id,
-                &opt.nft_mint_address,
+            borrower_nft_account: dbg!(get_associated_token_address(
                 &opt.borrower_wallet_keypair.pubkey(),
-                &opt.lender_wallet_address,
-                &opt.loan_id,
+                &opt.nft_mint_address
             )),
-            listing_account: dbg!(NFTListing::get_address(
+            pool_nft_account: dbg!(get_associated_token_address(&pool, &opt.nft_mint_address)),
+
+            deposit_account: dbg!(NFTDeposit::get_address(
                 &program_id,
                 &opt.nft_mint_address,
                 &opt.borrower_wallet_keypair.pubkey(),
+                &opt.loan_id,
             )),
 
             spl_program: spl_token::id(),
