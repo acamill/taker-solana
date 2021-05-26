@@ -3,13 +3,13 @@ mod nft_deposit;
 mod nft_pool;
 mod utils;
 
-use std::u64;
+pub use nft_deposit::{DepositState, LoanActiveState, LoanRepayedState};
 
 use anchor_lang::prelude::*;
 use anchor_spl::token::{Mint, TokenAccount};
 use fehler::throw;
-use nft_deposit::DepositState;
 use solana_program::pubkey::Pubkey;
+use std::u64;
 
 pub trait DerivedAccountIdentifier {
     const SEED: &'static [u8];
@@ -538,31 +538,17 @@ pub mod taker {
             clock,
         } = ctx.accounts;
 
-        let (started_at, expired_at, borrowed_amount) = match deposit_account.state {
-            DepositState::PendingLoan => throw!(TakerError::LoanNotActive),
-            DepositState::LoanActive {
-                expired_at,
-                borrowed_amount,
-                started_at,
-                ..
-            } => (started_at, expired_at, borrowed_amount),
-            DepositState::LoanLiquidated => {
-                throw!(TakerError::LoanLiquidated)
-            }
-            DepositState::LoanRepayed { .. } | DepositState::Withdrawn => {
-                throw!(TakerError::LoanNotActive)
-            }
-        };
+        let loan = deposit_account.get_active_state()?;
 
-        if clock.unix_timestamp > expired_at {
+        if clock.unix_timestamp > loan.expired_at {
             throw!(TakerError::LoanLiquidated)
         }
 
         assert!(pool_owner_dai_account.owner == pool.owner);
 
         let (interest, fee) = pool.calculate_interest_and_fee(
-            borrowed_amount,
-            clock.unix_timestamp.saturating_sub(started_at),
+            loan.borrowed_amount,
+            clock.unix_timestamp.saturating_sub(loan.started_at),
         );
 
         // transfer fee to the owner
@@ -590,7 +576,7 @@ pub mod taker {
                     authority: borrower_wallet_account.to_account_info(),
                 },
             ),
-            borrowed_amount.checked_add(lender_income).unwrap(),
+            loan.borrowed_amount.checked_add(lender_income).unwrap(),
         )?;
 
         // transfer the NFT to the borrower
@@ -608,7 +594,7 @@ pub mod taker {
         )?;
 
         // set corresponding records
-        deposit_account.repay(borrowed_amount.checked_add(lender_income).unwrap())?;
+        deposit_account.repay(loan.borrowed_amount.checked_add(lender_income).unwrap())?;
 
         Ok(())
     }
@@ -626,6 +612,9 @@ pub mod taker {
             pool_nft_account,
             lender_nft_account,
 
+            lender_tai_account,
+            pool_tai_account,
+
             deposit_account,
 
             ata_program,
@@ -635,28 +624,28 @@ pub mod taker {
             clock,
         } = ctx.accounts;
 
-        let (expired_at, total_amount, borrowed_amount) = match deposit_account.state {
-            DepositState::PendingLoan => throw!(TakerError::LoanNotActive),
-            DepositState::LoanActive {
-                total_amount,
-                borrowed_amount,
-                expired_at,
-                ..
-            } => (expired_at, total_amount, borrowed_amount),
-            DepositState::LoanLiquidated => {
-                throw!(TakerError::LoanLiquidated)
-            }
-            DepositState::LoanRepayed { .. } | DepositState::Withdrawn => {
-                throw!(TakerError::LoanNotActive)
-            }
-        };
+        let loan = deposit_account.get_active_state()?;
 
-        if clock.unix_timestamp <= expired_at {
+        if clock.unix_timestamp <= loan.expired_at {
             throw!(TakerError::LoanNotExpired)
         }
 
+        // Transfer the corresponding TAI to the pool
+        anchor_spl::token::transfer(
+            CpiContext::new(
+                spl_program.clone(),
+                anchor_spl::token::Transfer {
+                    from: lender_tai_account.to_account_info(),
+                    to: pool_tai_account.to_account_info(),
+                    authority: lender_wallet_account.to_account_info(),
+                },
+            ),
+            loan.borrowed_amount,
+        )?;
+
         // charge service fee using max_borrow_duration
-        let (_, fee) = pool.calculate_interest_and_fee(borrowed_amount, pool.max_loan_duration);
+        let (_, fee) =
+            pool.calculate_interest_and_fee(loan.borrowed_amount, pool.max_loan_duration);
 
         // transfer fee to the owner
         anchor_spl::token::transfer(
@@ -672,7 +661,7 @@ pub mod taker {
             fee,
         )?;
 
-        let withdrawable = total_amount - borrowed_amount - fee;
+        let withdrawable = loan.total_amount - loan.borrowed_amount - fee;
 
         // Transfer the remaining DAI to the lender
         anchor_spl::token::transfer(
@@ -719,6 +708,56 @@ pub mod taker {
             lender: *lender_wallet_account.key,
             loan_id: deposit_account.deposit_id,
         });
+
+        Ok(())
+    }
+
+    pub fn withdraw_locked_asset(ctx: Context<AccountsWithdrawLockedAsset>) -> Result<()> {
+        let AccountsWithdrawLockedAsset {
+            pool,
+            lender_wallet_account,
+
+            lender_tai_account,
+            pool_tai_account,
+
+            lender_dai_account,
+            pool_dai_account,
+
+            deposit_account,
+
+            spl_program,
+        } = ctx.accounts;
+
+        let repay = deposit_account.get_repayed_state()?;
+
+        // Transfer the TAI to the pool
+        anchor_spl::token::transfer(
+            CpiContext::new(
+                spl_program.clone(),
+                anchor_spl::token::Transfer {
+                    from: lender_tai_account.to_account_info(),
+                    to: pool_tai_account.to_account_info(),
+                    authority: lender_wallet_account.to_account_info(),
+                },
+            ),
+            repay.tai_required_to_unlock,
+        )?;
+
+        // Transfer the DAI to the lender
+        anchor_spl::token::transfer(
+            CpiContext::new_with_signer(
+                spl_program.clone(),
+                anchor_spl::token::Transfer {
+                    from: pool_dai_account.to_account_info(),
+                    to: lender_dai_account.to_account_info(),
+                    authority: pool.to_account_info(),
+                },
+                &[&[NFTPool::SEED, &[pool.bump_seed]]],
+            ),
+            repay.lender_withdrawable,
+        )?;
+
+        deposit_account.clear()?;
 
         Ok(())
     }
@@ -912,6 +951,11 @@ pub struct AccountsLiquidate<'info> {
     pub lender_nft_account: AccountInfo<'info>, // Possibly not allocated
 
     #[account(mut)]
+    pub lender_tai_account: CpiAccount<'info, TokenAccount>,
+    #[account(mut)]
+    pub pool_tai_account: CpiAccount<'info, TokenAccount>,
+
+    #[account(mut)]
     pub deposit_account: ProgramAccount<'info, NFTDeposit>,
 
     pub ata_program: AccountInfo<'info>,
@@ -919,6 +963,29 @@ pub struct AccountsLiquidate<'info> {
     pub system_program: AccountInfo<'info>,
     pub rent: Sysvar<'info, Rent>,
     pub clock: Sysvar<'info, Clock>,
+}
+
+#[derive(Accounts)]
+pub struct AccountsWithdrawLockedAsset<'info> {
+    pub pool: ProgramAccount<'info, NFTPool>,
+
+    #[account(signer)]
+    pub lender_wallet_account: AccountInfo<'info>,
+
+    #[account(mut)]
+    pub lender_tai_account: CpiAccount<'info, TokenAccount>,
+    #[account(mut)]
+    pub pool_tai_account: CpiAccount<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub lender_dai_account: CpiAccount<'info, TokenAccount>,
+    #[account(mut)]
+    pub pool_dai_account: CpiAccount<'info, TokenAccount>,
+
+    #[account(mut)]
+    pub deposit_account: ProgramAccount<'info, NFTDeposit>,
+
+    pub spl_program: AccountInfo<'info>,
 }
 
 #[error]
@@ -981,6 +1048,9 @@ pub enum TakerError {
 
     #[msg("The borrowed amount is too small")]
     BorrowedAmountTooSmall,
+
+    #[msg("Loan has not been repayed")]
+    LoanNotRepayed,
 }
 
 impl TakerError {

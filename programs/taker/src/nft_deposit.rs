@@ -12,20 +12,30 @@ impl DerivedAccountIdentifier for NFTDeposit {
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
 pub enum DepositState {
-    PendingLoan, // Loan hasn't happened yet and the NFT is in the pool
-    Withdrawn,   // Loan did not happen and the NFT is withdrawn by the borrower
-    LoanActive {
-        total_amount: u64,
-        borrowed_amount: u64,      // amount of dai
-        started_at: UnixTimestamp, // in seconds
-        expired_at: UnixTimestamp, // in seconds
-        lender: Pubkey,
-    }, // Loan is active
+    PendingLoan,                   // Loan hasn't happened yet and the NFT is in the pool
+    LoanActive(LoanActiveState),   // Loan is active
+    LoanRepayed(LoanRepayedState), // Loan repayed and the NFT is withdrawn by the borrower
+
+    // The following three are terminal state
+    Withdrawn,      // Loan did not happen and the NFT is withdrawn by the borrower
     LoanLiquidated, // Loan liquidated and the NFT is withdrawn by the lender
-    LoanRepayed {
-        lender_withdrawable: u64,
-        lender: Pubkey,
-    }, // Loan repayed and the NFT is withdrawn by the borrower
+    LoanCleared,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
+pub struct LoanActiveState {
+    pub total_amount: u64,
+    pub borrowed_amount: u64,      // amount of dai
+    pub started_at: UnixTimestamp, // in seconds
+    pub expired_at: UnixTimestamp, // in seconds
+    pub lender: Pubkey,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
+pub struct LoanRepayedState {
+    pub tai_required_to_unlock: u64,
+    pub lender_withdrawable: u64,
+    pub lender: Pubkey,
 }
 
 impl NFTDeposit {
@@ -97,8 +107,8 @@ impl NFTDeposit {
 
         match self.state {
             PendingLoan => self.state = DepositState::Withdrawn,
-            Withdrawn | LoanRepayed { .. } => throw!(TakerError::NFTAlreadyWithdrawn),
-            LoanActive { .. } | LoanLiquidated => throw!(TakerError::NFTLocked),
+            Withdrawn | LoanRepayed { .. } | LoanCleared => throw!(TakerError::NFTAlreadyWithdrawn),
+            LoanActive(_) | LoanLiquidated => throw!(TakerError::NFTLocked),
         }
     }
 
@@ -116,23 +126,28 @@ impl NFTDeposit {
         }
 
         assert!(total_amount >= borrowed_amount);
-        self.state = DepositState::LoanActive {
+        self.state = DepositState::LoanActive(LoanActiveState {
             lender,
             total_amount,
             borrowed_amount,            // amount of dai
             started_at: start,          // in seconds
             expired_at: start + length, // in seconds
-        };
+        });
     }
 
     #[throws(TakerError)]
     pub fn repay(&mut self, lender_withdrawable: u64) {
         match self.state {
-            DepositState::LoanActive { lender, .. } => {
-                self.state = DepositState::LoanRepayed {
+            DepositState::LoanActive(LoanActiveState {
+                lender,
+                borrowed_amount,
+                ..
+            }) => {
+                self.state = DepositState::LoanRepayed(LoanRepayedState {
+                    tai_required_to_unlock: borrowed_amount,
                     lender_withdrawable,
                     lender,
-                }
+                })
             }
             _ => {
                 throw!(TakerError::LoanNotActive)
@@ -149,6 +164,42 @@ impl NFTDeposit {
             _ => {
                 throw!(TakerError::LoanNotActive)
             }
+        }
+    }
+
+    #[throws(TakerError)]
+    pub fn clear(&mut self) {
+        match self.state {
+            DepositState::LoanRepayed { .. } => {
+                self.state = DepositState::LoanCleared;
+            }
+            _ => {
+                throw!(TakerError::LoanNotRepayed)
+            }
+        }
+    }
+
+    #[throws(TakerError)]
+    pub fn get_active_state(&self) -> LoanActiveState {
+        match self.state {
+            DepositState::PendingLoan
+            | DepositState::LoanLiquidated
+            | DepositState::LoanRepayed { .. }
+            | DepositState::Withdrawn
+            | DepositState::LoanCleared => throw!(TakerError::LoanNotActive),
+            DepositState::LoanActive(s) => s,
+        }
+    }
+
+    #[throws(TakerError)]
+    pub fn get_repayed_state(&self) -> LoanRepayedState {
+        match self.state {
+            DepositState::PendingLoan
+            | DepositState::LoanLiquidated
+            | DepositState::Withdrawn
+            | DepositState::LoanCleared => throw!(TakerError::LoanNotActive),
+            DepositState::LoanActive { .. } => throw!(TakerError::LoanNotRepayed),
+            DepositState::LoanRepayed(r) => r,
         }
     }
 
@@ -212,13 +263,13 @@ impl NFTDeposit {
         // Pick the largest variant so that we are safe
         let largest_instance = NFTDeposit {
             deposit_id: Pubkey::new(&[0u8; 32]),
-            state: DepositState::LoanActive {
+            state: DepositState::LoanActive(LoanActiveState {
                 total_amount: 0,
-                borrowed_amount: 0, // amount of dai
-                started_at: 0,      // in seconds
-                expired_at: 0,      // in seconds
+                borrowed_amount: 0,
+                started_at: 0,
+                expired_at: 0,
                 lender: Pubkey::new(&[0u8; 32]),
-            },
+            }),
         };
 
         let acc_size = 8 + largest_instance.try_to_vec().unwrap().len();
