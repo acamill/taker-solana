@@ -40,8 +40,8 @@ impl NFTBid {
             utils::create_derived_account_with_seed(
                 program_id,
                 wallet,
-                bid_account,
                 seeds_with_bump,
+                bid_account,
                 acc_size,
                 &rent,
                 &system,

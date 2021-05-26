@@ -69,11 +69,7 @@ pub mod taker {
             rent,
         } = ctx.accounts;
 
-        let (_, bump) = NFTPool::get_address_with_bump(ctx.program_id);
-
-        NFTPool::verify_address(&ctx.program_id, bump, &pool.key)?;
-
-        let pool = NFTPool::new(
+        let pool = NFTPool::new_checked(
             ctx.program_id,
             pool,
             pool_owner,
@@ -82,10 +78,9 @@ pub mod taker {
             dai_mint,
             rent,
             system,
-            bump,
         )?;
 
-        // Create accounts for this contract on tkr, tai and dai
+        // Create token accounts for this contract for TKR, TAI and DAI
         for (mint, token) in &[
             (tkr_mint, pool_tkr_account),
             (tai_mint, pool_tai_account),
@@ -103,7 +98,7 @@ pub mod taker {
             )?;
         }
 
-        emit!(EventContractAllocated {
+        emit!(EventInitialized {
             account: *pool.to_account_info().key
         });
 
@@ -145,12 +140,12 @@ pub mod taker {
             nft_mint,
             tkr_mint,
 
-            user_nft_account,
+            borrower_nft_account: user_nft_account,
             pool_nft_account,
             pool_tkr_account,
-            user_tkr_account,
+            borrower_tkr_account: user_tkr_account,
 
-            deposit_account: loan_account,
+            deposit_account,
 
             rent,
 
@@ -186,6 +181,18 @@ pub mod taker {
             rent,
         )?;
 
+        // create and deposit to the deposit account
+        // error out if the account exists
+        let deposit_account = NFTDeposit::deposit(
+            ctx.program_id,
+            &deposit_id,
+            nft_mint.to_account_info().key,
+            borrower_wallet_account,
+            deposit_account,
+            rent,
+            system_program,
+        )?;
+
         // Transfer NFT to the pool
         anchor_spl::token::transfer(
             CpiContext::new(
@@ -213,17 +220,6 @@ pub mod taker {
             pool.incentive,
         )?;
 
-        // create the loan account if not created
-        let deposit_account = NFTDeposit::deposit(
-            ctx.program_id,
-            &deposit_id,
-            nft_mint.to_account_info().key,
-            borrower_wallet_account,
-            loan_account,
-            rent,
-            system_program,
-        )?;
-
         // Persistent back the data. Since we created the ProgramAccount by ourselves, we need to do this manually.
         deposit_account.exit(ctx.program_id)?;
 
@@ -248,7 +244,7 @@ pub mod taker {
             spl_program,
         } = ctx.accounts;
 
-        // verify the listing account indeed belongs to the user
+        // verify the deposit account indeed belongs to the user
         let (_, bump) = NFTDeposit::get_address_with_bump(
             ctx.program_id,
             nft_mint.to_account_info().key,
@@ -766,7 +762,7 @@ pub mod taker {
 #[derive(Accounts)]
 pub struct AccountsInitialize<'info> {
     #[account(signer)]
-    pub pool_owner: AccountInfo<'info>, // also the funder
+    pub pool_owner: AccountInfo<'info>, // also the funder and the fee collector
     #[account(mut)]
     pub pool: AccountInfo<'info>, // We cannot use  ProgramAccount<'info, TakerContract> here because it is not allocated yet
 
@@ -781,6 +777,7 @@ pub struct AccountsInitialize<'info> {
     pub dai_mint: CpiAccount<'info, Mint>,
     #[account(mut)]
     pub pool_dai_account: AccountInfo<'info>, // this is not allocated yet
+
     pub ata_program: AccountInfo<'info>,
     pub spl_program: AccountInfo<'info>,
     pub system_program: AccountInfo<'info>,
@@ -789,7 +786,7 @@ pub struct AccountsInitialize<'info> {
 #[derive(Accounts)]
 pub struct AccountsChangeLoanSetting<'info> {
     #[account(signer)]
-    pub owner: AccountInfo<'info>,
+    pub owner: AccountInfo<'info>, // only owner can change the setting
     #[account(mut, has_one = owner)]
     pub pool: ProgramAccount<'info, NFTPool>,
 }
@@ -804,14 +801,14 @@ pub struct AccountsDepositNFT<'info> {
     pub tkr_mint: CpiAccount<'info, Mint>,
 
     #[account(mut)]
-    pub user_nft_account: CpiAccount<'info, TokenAccount>,
+    pub borrower_nft_account: CpiAccount<'info, TokenAccount>,
     #[account(mut)]
     pub pool_nft_account: AccountInfo<'info>, // potentially this is not allocated yet
 
     #[account(mut)]
-    pub pool_tkr_account: CpiAccount<'info, TokenAccount>,
+    pub borrower_tkr_account: AccountInfo<'info>, // potentially this is not allocated yet
     #[account(mut)]
-    pub user_tkr_account: AccountInfo<'info>, // potentially this is not allocated yet
+    pub pool_tkr_account: CpiAccount<'info, TokenAccount>,
 
     #[account(mut)]
     pub deposit_account: AccountInfo<'info>, // Essentially this is ProgramAccount<NFTDeposit>, however, we've not allocated the space for it yet. We cannot use ProgramAccount here.
@@ -1061,7 +1058,7 @@ impl TakerError {
 
 #[event]
 #[derive(Debug)]
-pub struct EventContractAllocated {
+pub struct EventInitialized {
     account: Pubkey,
 }
 

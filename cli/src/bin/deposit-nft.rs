@@ -45,15 +45,16 @@ fn main() -> Result<()> {
             borrower_wallet_account: opt.borrower_wallet_keypair.pubkey(),
 
             nft_mint: opt.nft_mint_address,
-            user_nft_account: dbg!(get_associated_token_address(
+            tkr_mint: opt.tkr_mint_address,
+
+            borrower_nft_account: dbg!(get_associated_token_address(
                 &opt.borrower_wallet_keypair.pubkey(),
                 &opt.nft_mint_address
             )),
             pool_nft_account: dbg!(get_associated_token_address(&pool, &opt.nft_mint_address)),
 
-            tkr_mint: opt.tkr_mint_address,
             pool_tkr_account: dbg!(get_associated_token_address(&pool, &opt.tkr_mint_address)),
-            user_tkr_account: dbg!(get_associated_token_address(
+            borrower_tkr_account: dbg!(get_associated_token_address(
                 &opt.borrower_wallet_keypair.pubkey(),
                 &opt.tkr_mint_address
             )),

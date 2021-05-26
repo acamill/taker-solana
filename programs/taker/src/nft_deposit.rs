@@ -43,27 +43,27 @@ impl NFTDeposit {
     pub fn deposit<'info>(
         program_id: &Pubkey,
         deposit_id: &Pubkey,
-        mint: &Pubkey,
+        nft_mint: &Pubkey,
         borrower_wallet: &AccountInfo<'info>,
-        loan_account: &AccountInfo<'info>,
+        deposit_account: &AccountInfo<'info>,
         rent: &Sysvar<'info, Rent>,
         system_program: &AccountInfo<'info>,
     ) -> ProgramAccount<'info, Self> {
         let (_, bump) =
-            Self::get_address_with_bump(program_id, mint, borrower_wallet.key, deposit_id);
+            Self::get_address_with_bump(program_id, nft_mint, borrower_wallet.key, deposit_id);
 
         Self::verify_address(
             program_id,
-            mint,
+            nft_mint,
             borrower_wallet.key,
             deposit_id,
             bump,
-            loan_account.key,
+            deposit_account.key,
         )?;
 
         // Do not reuse the loan record
         // TODO: deallocate the loan record and give lamports back to the user.
-        if crate::utils::is_account_allocated(loan_account) {
+        if crate::utils::is_account_allocated(deposit_account) {
             throw!(TakerError::LoanAlreadyExist);
         }
 
@@ -74,7 +74,7 @@ impl NFTDeposit {
 
         let seeds_with_bump: &[&[_]] = &[
             Self::SEED,
-            &mint.to_bytes(),
+            &nft_mint.to_bytes(),
             &borrower_wallet.key.to_bytes(),
             &deposit_id.to_bytes(),
             &[bump],
@@ -83,20 +83,20 @@ impl NFTDeposit {
         utils::create_derived_account_with_seed(
             program_id,
             borrower_wallet,
-            loan_account,
             seeds_with_bump,
+            deposit_account,
             Self::account_size() as u64,
             &rent,
             &system_program,
         )?;
 
         {
-            let mut data = loan_account.try_borrow_mut_data()?;
+            let mut data = deposit_account.try_borrow_mut_data()?;
             let mut cursor = std::io::Cursor::new(&mut **data);
             instance.try_serialize(&mut cursor)?;
         }
 
-        let loan_account = ProgramAccount::try_from(loan_account)?;
+        let loan_account = ProgramAccount::try_from(deposit_account)?;
 
         loan_account
     }

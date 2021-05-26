@@ -14,7 +14,7 @@ impl DerivedAccountIdentifier for NFTPool {
 
 impl NFTPool {
     #[throws(ProgramError)]
-    pub fn new<'info>(
+    pub fn new_checked<'info>(
         program_id: &Pubkey,
         pool: &AccountInfo<'info>,
         pool_owner: &AccountInfo<'info>,
@@ -23,8 +23,10 @@ impl NFTPool {
         dai_mint: &CpiAccount<'info, Mint>,
         rent: &Sysvar<'info, Rent>,
         system_program: &AccountInfo<'info>,
-        bump: u8,
     ) -> ProgramAccount<'info, Self> {
+        let (_, bump) = NFTPool::get_address_with_bump(program_id);
+        NFTPool::verify_address(program_id, bump, &pool.key)?;
+
         let instance = Self {
             bump_seed: bump,
             owner: *pool_owner.key,
@@ -50,8 +52,8 @@ impl NFTPool {
         utils::create_derived_account_with_seed(
             program_id, // The program ID of Taker Contract
             &pool_owner,
-            &pool,
             &[Self::SEED, &[bump]],
+            &pool,
             acc_size,
             &rent,
             &system_program,

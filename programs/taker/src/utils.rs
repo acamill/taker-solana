@@ -8,8 +8,8 @@ use solana_program::{program::invoke, system_instruction};
 pub fn create_derived_account_with_seed<'info>(
     program_id: &Pubkey, // The program ID of Taker Contract
     funder: &AccountInfo<'info>,
-    account: &AccountInfo<'info>,
     seeds_with_bump: &[&[u8]],
+    account: &AccountInfo<'info>,
     acc_size: u64,
     rent: &Sysvar<'info, Rent>,
     system: &AccountInfo<'info>,
@@ -66,8 +66,8 @@ pub fn create_associated_token_account<'info>(
     invoke(
         &ix,
         &[
-            funder.to_account_info(),
-            token_account.to_account_info(),
+            funder.clone(),
+            token_account.clone(),
             wallet.clone(),
             mint.to_account_info(),
             ata_program.clone(),

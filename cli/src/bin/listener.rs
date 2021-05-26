@@ -5,7 +5,7 @@ use solana_sdk::{pubkey::Pubkey, signature::Keypair};
 use std::thread::sleep;
 use std::time::Duration;
 use structopt::StructOpt;
-use taker::EventContractAllocated;
+use taker::EventInitialized;
 
 #[derive(Debug, StructOpt)]
 #[structopt(name = "listener", about = "Making transactions to the Taker Protocol")]
@@ -23,7 +23,7 @@ fn main() -> Result<()> {
     let client = Client::new(Cluster::Devnet, Keypair::generate(&mut OsRng));
     let program = client.program(program_id);
 
-    let _h = program.on(|_, e: EventContractAllocated| {
+    let _h = program.on(|_, e: EventInitialized| {
         println!("{:?}", e);
     })?;
 
