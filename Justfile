@@ -23,5 +23,17 @@ b58keypair:
       j = json.load(f)
   print(base58.b58encode(bytes(j)))
 
-transfer-tkr-to-pool dst:
+transfer-to-pool dst:
   spl-token transfer $TKR_MINT_ADDRESS 10000 {{dst}}
+  spl-token transfer $TAI_MINT_ADDRESS 10000 {{dst}}
+
+
+combo:
+  just deploy
+
+  cargo build --bins
+  
+  just cli initialize
+  just cli bid --price 1000 --qty 10
+  just cli deposit-nft
+  

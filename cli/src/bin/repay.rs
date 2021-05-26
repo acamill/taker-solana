@@ -13,7 +13,7 @@ struct Opt {
     taker_program_address: Option<Pubkey>,
 
     #[structopt(long, env)]
-    taker_authority_address: Pubkey,
+    pool_owner_address: Pubkey,
 
     #[structopt(long, env)]
     borrower_wallet_keypair: Keypair,
@@ -28,7 +28,7 @@ struct Opt {
     nft_mint_address: Pubkey,
 
     #[structopt(long, env)]
-    loan_id: Pubkey,
+    deposit_id: Pubkey,
 }
 
 fn main() -> Result<()> {
@@ -51,7 +51,7 @@ fn main() -> Result<()> {
             borrower_wallet_account: opt.borrower_wallet_keypair.pubkey(),
 
             pool_owner_dai_account: dbg!(get_associated_token_address(
-                &opt.taker_authority_address,
+                &opt.pool_owner_address,
                 &opt.dai_mint_address
             )),
             borrower_dai_account: dbg!(get_associated_token_address(
@@ -73,7 +73,7 @@ fn main() -> Result<()> {
                 &program_id,
                 &opt.nft_mint_address,
                 &opt.borrower_wallet_keypair.pubkey(),
-                &opt.loan_id,
+                &opt.deposit_id,
             )),
 
             spl_program: spl_token::id(),

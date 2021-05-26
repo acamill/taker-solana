@@ -7,7 +7,7 @@ use borsh::{BorshDeserialize, BorshSerialize};
 use fehler::{throw, throws};
 
 impl DerivedAccountIdentifier for NFTDeposit {
-    const SEED: &'static [u8] = b"TakerNFTLoan";
+    const SEED: &'static [u8] = b"TakerNFTDeposit";
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone, Copy)]
@@ -16,7 +16,7 @@ pub enum DepositState {
     Withdrawn,   // Loan did not happen and the NFT is withdrawn by the borrower
     LoanActive {
         total_amount: u64,
-        lent_amount: u64,          // amount of dai
+        borrowed_amount: u64,      // amount of dai
         started_at: UnixTimestamp, // in seconds
         expired_at: UnixTimestamp, // in seconds
         lender: Pubkey,
@@ -62,11 +62,6 @@ impl NFTDeposit {
             state: DepositState::PendingLoan,
         };
 
-        let acc_size = 8 + instance
-            .try_to_vec()
-            .map_err(|_| ProgramError::Custom(1))?
-            .len() as u64;
-
         let seeds_with_bump: &[&[_]] = &[
             Self::SEED,
             &mint.to_bytes(),
@@ -80,7 +75,7 @@ impl NFTDeposit {
             borrower_wallet,
             loan_account,
             seeds_with_bump,
-            acc_size,
+            Self::account_size() as u64,
             &rent,
             &system_program,
         )?;
@@ -112,7 +107,7 @@ impl NFTDeposit {
         &mut self,
         lender: Pubkey,
         total_amount: u64,
-        lent_amount: u64,
+        borrowed_amount: u64,
         start: UnixTimestamp,
         length: i64,
     ) {
@@ -120,11 +115,11 @@ impl NFTDeposit {
             throw!(TakerError::BorrowAlreadyStarted)
         }
 
-        assert!(total_amount >= lent_amount);
+        assert!(total_amount >= borrowed_amount);
         self.state = DepositState::LoanActive {
             lender,
             total_amount,
-            lent_amount,                // amount of dai
+            borrowed_amount,            // amount of dai
             started_at: start,          // in seconds
             expired_at: start + length, // in seconds
         };
@@ -210,5 +205,23 @@ impl NFTDeposit {
         if &addr != address {
             throw!(TakerError::NFTLoanAddressNotCorrect);
         }
+    }
+
+    fn account_size() -> usize {
+        // Borsh does not support vary size structure.
+        // Pick the largest variant so that we are safe
+        let largest_instance = NFTDeposit {
+            deposit_id: Pubkey::new(&[0u8; 32]),
+            state: DepositState::LoanActive {
+                total_amount: 0,
+                borrowed_amount: 0, // amount of dai
+                started_at: 0,      // in seconds
+                expired_at: 0,      // in seconds
+                lender: Pubkey::new(&[0u8; 32]),
+            },
+        };
+
+        let acc_size = 8 + largest_instance.try_to_vec().unwrap().len();
+        acc_size
     }
 }

@@ -13,7 +13,7 @@ struct Opt {
     taker_program_address: Option<Pubkey>,
 
     #[structopt(long, env)]
-    lender_account_keypair: Keypair,
+    lender_wallet_keypair: Keypair,
 
     #[structopt(long, env)]
     dai_mint_address: Pubkey,
@@ -30,7 +30,7 @@ fn main() -> Result<()> {
         .taker_program_address
         .unwrap_or_else(load_program_from_idl);
 
-    let lender_account_keypair = &opt.lender_account_keypair;
+    let lender_account_keypair = &opt.lender_wallet_keypair;
 
     let client = Client::new(Cluster::Devnet, lender_account_keypair.clone().0);
     let program = client.program(program_id);

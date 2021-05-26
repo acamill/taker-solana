@@ -1,5 +1,3 @@
-#![forbid(unsafe_code)]
-
 mod nft_bid;
 mod nft_deposit;
 mod nft_pool;
@@ -451,16 +449,20 @@ pub mod taker {
 
         // set related records
         let total_amount = amount;
-        let lent_amount = total_amount
+        let borrowed_amount = total_amount
             .checked_mul(pool.mortgage_rate)
             .unwrap()
-            .checked_mul(10000)
+            .checked_div(10000)
             .unwrap();
+
+        if borrowed_amount <= 0 {
+            throw!(TakerError::BorrowedAmountTooSmall)
+        }
 
         deposit_account.start_borrow(
             *lender_wallet_account.key,
             total_amount,
-            lent_amount,
+            borrowed_amount,
             clock.unix_timestamp,
             pool.max_loan_duration,
         )?;
@@ -492,7 +494,7 @@ pub mod taker {
                 },
                 &[&[NFTPool::SEED, &[pool.bump_seed]]],
             ),
-            lent_amount,
+            borrowed_amount,
         )?;
 
         // transfer TAI to the lender
@@ -506,16 +508,17 @@ pub mod taker {
                 },
                 &[&[NFTPool::SEED, &[pool.bump_seed]]],
             ),
-            lent_amount,
+            borrowed_amount,
         )?;
 
         emit!(EventBorrowed {
             borrower: *borrower_wallet_account.key,
             lender: *lender_wallet_account.key,
-            amount: lent_amount,
+            amount: borrowed_amount,
             length: pool.max_loan_duration
         });
 
+        msg!("ahaha");
         Ok(())
     }
 
@@ -535,14 +538,14 @@ pub mod taker {
             clock,
         } = ctx.accounts;
 
-        let (started_at, expired_at, lent_amount) = match deposit_account.state {
+        let (started_at, expired_at, borrowed_amount) = match deposit_account.state {
             DepositState::PendingLoan => throw!(TakerError::LoanNotActive),
             DepositState::LoanActive {
                 expired_at,
-                lent_amount,
+                borrowed_amount,
                 started_at,
                 ..
-            } => (started_at, expired_at, lent_amount),
+            } => (started_at, expired_at, borrowed_amount),
             DepositState::LoanLiquidated => {
                 throw!(TakerError::LoanLiquidated)
             }
@@ -558,7 +561,7 @@ pub mod taker {
         assert!(pool_owner_dai_account.owner == pool.owner);
 
         let (interest, fee) = pool.calculate_interest_and_fee(
-            lent_amount,
+            borrowed_amount,
             clock.unix_timestamp.saturating_sub(started_at),
         );
 
@@ -587,7 +590,7 @@ pub mod taker {
                     authority: borrower_wallet_account.to_account_info(),
                 },
             ),
-            lent_amount.checked_add(lender_income).unwrap(),
+            borrowed_amount.checked_add(lender_income).unwrap(),
         )?;
 
         // transfer the NFT to the borrower
@@ -605,7 +608,7 @@ pub mod taker {
         )?;
 
         // set corresponding records
-        deposit_account.repay(lent_amount.checked_add(lender_income).unwrap())?;
+        deposit_account.repay(borrowed_amount.checked_add(lender_income).unwrap())?;
 
         Ok(())
     }
@@ -632,14 +635,14 @@ pub mod taker {
             clock,
         } = ctx.accounts;
 
-        let (expired_at, total_amount, lent_amount) = match deposit_account.state {
+        let (expired_at, total_amount, borrowed_amount) = match deposit_account.state {
             DepositState::PendingLoan => throw!(TakerError::LoanNotActive),
             DepositState::LoanActive {
                 total_amount,
-                lent_amount,
+                borrowed_amount,
                 expired_at,
                 ..
-            } => (expired_at, total_amount, lent_amount),
+            } => (expired_at, total_amount, borrowed_amount),
             DepositState::LoanLiquidated => {
                 throw!(TakerError::LoanLiquidated)
             }
@@ -653,7 +656,7 @@ pub mod taker {
         }
 
         // charge service fee using max_borrow_duration
-        let (_, fee) = pool.calculate_interest_and_fee(lent_amount, pool.max_loan_duration);
+        let (_, fee) = pool.calculate_interest_and_fee(borrowed_amount, pool.max_loan_duration);
 
         // transfer fee to the owner
         anchor_spl::token::transfer(
@@ -669,7 +672,7 @@ pub mod taker {
             fee,
         )?;
 
-        let withdrawable = total_amount - lent_amount - fee;
+        let withdrawable = total_amount - borrowed_amount - fee;
 
         // Transfer the remaining DAI to the lender
         anchor_spl::token::transfer(
@@ -921,7 +924,7 @@ pub struct AccountsLiquidate<'info> {
 #[error]
 pub enum TakerError {
     #[msg("Not Authorized")]
-    NotAuhorized,
+    NotAuhorized = 0,
     #[msg("Contract address not correct")]
     ContractAddressNotCorrect,
 
@@ -975,6 +978,15 @@ pub enum TakerError {
 
     #[msg("NFT is locked")]
     NFTLocked,
+
+    #[msg("The borrowed amount is too small")]
+    BorrowedAmountTooSmall,
+}
+
+impl TakerError {
+    pub fn from_code(c: u32) -> TakerError {
+        unsafe { std::mem::transmute(c - 100) }
+    }
 }
 
 #[event]

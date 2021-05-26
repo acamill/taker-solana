@@ -1,11 +1,16 @@
-use anchor_client::{Client, Cluster};
+use anchor_client::{Client, ClientError as ClientError0, Cluster};
 use anyhow::Result;
 use cli::{load_program_from_idl, Keypair};
+use solana_client::{
+    client_error::{ClientError, ClientErrorKind},
+    rpc_request::{RpcError, RpcResponseErrorData},
+    rpc_response::RpcSimulateTransactionResult,
+};
+use solana_sdk::{instruction::InstructionError, transaction::TransactionError};
 use solana_sdk::{pubkey::Pubkey, signature::Signer};
 use spl_associated_token_account::get_associated_token_address;
 use structopt::StructOpt;
-use taker::{NFTDeposit, NFTPool};
-
+use taker::{NFTDeposit, NFTPool, TakerError};
 #[derive(Debug, StructOpt)]
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
 struct Opt {
@@ -37,7 +42,7 @@ fn main() -> Result<()> {
 
     let pool = NFTPool::get_address(&program.id());
 
-    let tx = program
+    let resp = program
         .request()
         .accounts(taker::accounts::AccountsWithdrawNFT {
             pool,
@@ -63,9 +68,32 @@ fn main() -> Result<()> {
             deposit_id: opt.deposit_id,
         })
         .signer(&**borrower_wallet_keypair)
-        .send()?;
+        .send();
 
-    println!("The transaction is {}", tx);
+    match resp {
+        Ok(tx) => println!("The transaction is {}", tx),
+        Err(ClientError0::SolanaClientError(ClientError {
+            kind:
+                ClientErrorKind::RpcError(RpcError::RpcResponseError {
+                    data:
+                        RpcResponseErrorData::SendTransactionPreflightFailure(
+                            RpcSimulateTransactionResult {
+                                err:
+                                    Some(TransactionError::InstructionError(
+                                        _,
+                                        InstructionError::Custom(code),
+                                    )),
+                                ..
+                            },
+                        ),
+                    ..
+                }),
+            ..
+        })) => {
+            println!("Error: {}", TakerError::from_code(code));
+        }
+        Err(e) => println!("{:?}", e),
+    };
 
     Ok(())
 }

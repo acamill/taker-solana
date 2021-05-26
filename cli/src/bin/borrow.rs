@@ -1,10 +1,17 @@
+use anchor_client::ClientError as ClientError0;
 use anchor_client::{Client, Cluster};
 use anyhow::Result;
 use cli::{load_program_from_idl, Keypair};
-use rand::rngs::OsRng;
+use solana_client::{
+    client_error::{ClientError, ClientErrorKind},
+    rpc_request::{RpcError, RpcResponseErrorData},
+    rpc_response::RpcSimulateTransactionResult,
+};
+use solana_sdk::{instruction::InstructionError, transaction::TransactionError};
 use solana_sdk::{pubkey::Pubkey, signature::Signer, sysvar};
 use spl_associated_token_account::get_associated_token_address;
 use structopt::StructOpt;
+use taker::TakerError;
 use taker::{NFTBid, NFTDeposit, NFTPool};
 
 #[derive(Debug, StructOpt)]
@@ -40,14 +47,12 @@ fn main() -> Result<()> {
         .taker_program_address
         .unwrap_or_else(load_program_from_idl);
 
-    let loan_id = solana_sdk::signature::Keypair::generate(&mut OsRng).pubkey();
-
     let client = Client::new(Cluster::Devnet, opt.borrower_wallet_keypair.clone().0);
     let program = client.program(program_id);
 
     let pool = NFTPool::get_address(&program.id());
 
-    let tx = program
+    let resp = program
         .request()
         .accounts(taker::accounts::AccountsBorrow {
             pool,
@@ -86,12 +91,36 @@ fn main() -> Result<()> {
             spl_program: spl_token::id(),
             clock: sysvar::clock::id(),
         })
-        .args(taker::instruction::Borrow { amount: 1 })
+        .args(taker::instruction::Borrow {
+            amount: 998 * 10u64.pow(9),
+        })
         .signer(&opt.borrower_wallet_keypair.clone().0)
-        .send()?;
+        .send();
 
-    println!("The transaction is {}", tx);
-    println!("The loan_id is {}", loan_id);
+    match resp {
+        Ok(tx) => println!("The transaction is {}", tx),
+        Err(ClientError0::SolanaClientError(ClientError {
+            kind:
+                ClientErrorKind::RpcError(RpcError::RpcResponseError {
+                    data:
+                        RpcResponseErrorData::SendTransactionPreflightFailure(
+                            RpcSimulateTransactionResult {
+                                err:
+                                    Some(TransactionError::InstructionError(
+                                        _,
+                                        InstructionError::Custom(code),
+                                    )),
+                                ..
+                            },
+                        ),
+                    ..
+                }),
+            ..
+        })) => {
+            println!("Error: {}", TakerError::from_code(code));
+        }
+        Err(e) => println!("{:?}", e),
+    };
 
     Ok(())
 }

@@ -559,6 +559,7 @@ name = "cli"
 version = "0.1.0"
 dependencies = [
  "anchor-client",
+ "anchor-spl",
  "anyhow",
  "derive_more",
  "env_logger",
@@ -569,6 +570,7 @@ dependencies = [
  "serde_json",
  "solana-client",
  "solana-logger",
+ "solana-program",
  "solana-sdk",
  "spl-associated-token-account",
  "spl-token",
@@ -3581,6 +3583,7 @@ dependencies = [
  "anchor-spl",
  "borsh",
  "fehler",
+ "num-derive",
  "solana-program",
  "solana-sdk",
  "spl-associated-token-account",

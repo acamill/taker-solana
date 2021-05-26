@@ -75,6 +75,7 @@ fn main() -> Result<()> {
         .send()?;
 
     println!("The transaction is {}", tx);
+    println!("The deposit_id is {}", deposit_id);
 
     Ok(())
 }
