@@ -44,7 +44,7 @@ fn main() -> Result<()> {
 
     let content: NFTDeposit = program.account(deposit_account)?;
 
-    println!("Deposit: {:?}", content);
+    println!("Account: {:?}, Deposit: {:?}", deposit_account, content);
 
     Ok(())
 }

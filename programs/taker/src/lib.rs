@@ -140,10 +140,11 @@ pub mod taker {
             nft_mint,
             tkr_mint,
 
-            borrower_nft_account: user_nft_account,
             pool_nft_account,
+            borrower_nft_account,
+
             pool_tkr_account,
-            borrower_tkr_account: user_tkr_account,
+            borrower_tkr_account,
 
             deposit_account,
 
@@ -174,7 +175,7 @@ pub mod taker {
         NFTPool::ensure_user_token_account(
             borrower_wallet_account,
             tkr_mint,
-            user_tkr_account,
+            borrower_tkr_account,
             ata_program,
             spl_program,
             system_program,
@@ -198,7 +199,7 @@ pub mod taker {
             CpiContext::new(
                 spl_program.clone(),
                 anchor_spl::token::Transfer {
-                    from: user_nft_account.to_account_info(),
+                    from: borrower_nft_account.to_account_info(),
                     to: pool_nft_account.clone(),
                     authority: borrower_wallet_account.clone(),
                 },
@@ -212,7 +213,7 @@ pub mod taker {
                 spl_program.clone(),
                 anchor_spl::token::Transfer {
                     from: pool_tkr_account.to_account_info(),
-                    to: user_tkr_account.clone(),
+                    to: borrower_tkr_account.clone(),
                     authority: pool.to_account_info(),
                 },
                 &[&[NFTPool::SEED, &[pool.bump_seed]]],
