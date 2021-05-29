@@ -515,7 +515,6 @@ pub mod taker {
             length: pool.max_loan_duration
         });
 
-        msg!("ahaha");
         Ok(())
     }
 
@@ -562,6 +561,7 @@ pub mod taker {
         )?;
 
         let lender_income = interest.checked_sub(fee).unwrap();
+        let repayed_amount = loan.borrowed_amount.checked_add(lender_income).unwrap();
 
         // transfer the DAI to the pool, waiting for the lender to withdraw
         anchor_spl::token::transfer(
@@ -573,7 +573,7 @@ pub mod taker {
                     authority: borrower_wallet_account.to_account_info(),
                 },
             ),
-            loan.borrowed_amount.checked_add(lender_income).unwrap(),
+            repayed_amount,
         )?;
 
         // transfer the NFT to the borrower
@@ -592,6 +592,14 @@ pub mod taker {
 
         // set corresponding records
         deposit_account.repay(loan.borrowed_amount.checked_add(lender_income).unwrap())?;
+
+        emit!(EventRepayed {
+            borrower: *borrower_wallet_account.key,
+            lender: loan.lender,
+            amount: repayed_amount,
+            fee,
+            lender_income
+        });
 
         Ok(())
     }
@@ -704,6 +712,7 @@ pub mod taker {
         emit!(EventLiquidated {
             lender: *lender_wallet_account.key,
             loan_id: deposit_account.deposit_id,
+            withdrawable,
         });
 
         Ok(())
@@ -755,6 +764,11 @@ pub mod taker {
         )?;
 
         deposit_account.clear()?;
+
+        emit!(EventWithDrawLockedAsset {
+            lender: *lender_wallet_account.key,
+            amount: repay.lender_withdrawable,
+        });
 
         Ok(())
     }
@@ -1116,7 +1130,25 @@ pub struct EventBorrowed {
 
 #[event]
 #[derive(Debug)]
+pub struct EventRepayed {
+    borrower: Pubkey,
+    lender: Pubkey,
+    amount: u64,
+    fee: u64,
+    lender_income: u64,
+}
+
+#[event]
+#[derive(Debug)]
 pub struct EventLiquidated {
     lender: Pubkey,
     loan_id: Pubkey,
+    withdrawable: u64,
+}
+
+#[event]
+#[derive(Debug)]
+pub struct EventWithDrawLockedAsset {
+    lender: Pubkey,
+    amount: u64,
 }
