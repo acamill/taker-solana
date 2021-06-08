@@ -1,5 +1,5 @@
 cli prog +ARGS="":
-  cargo run --bin {{prog}} -- {{ARGS}}
+  cargo run --release --bin {{prog}} -- {{ARGS}}
 
 build:
   anchor build
@@ -31,9 +31,7 @@ transfer-to-pool dst:
 combo:
   just deploy
 
-  cargo build --bins
+  cargo build --bins --release
   
   just cli initialize
-  just cli bid --price 1000 --qty 10
-  just cli deposit-nft
   

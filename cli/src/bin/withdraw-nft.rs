@@ -1,6 +1,7 @@
-use anchor_client::{Client, ClientError as ClientError0, Cluster};
+use anchor_client::{Client, ClientError as ClientError0};
 use anyhow::Result;
-use cli::{load_program_from_idl, Keypair};
+use cli::{get_cluster, load_program_from_idl, Keypair};
+use solana_clap_utils::input_parsers::keypair_of;
 use solana_client::{
     client_error::{ClientError, ClientErrorKind},
     rpc_request::{RpcError, RpcResponseErrorData},
@@ -11,6 +12,7 @@ use solana_sdk::{pubkey::Pubkey, signature::Signer};
 use spl_associated_token_account::get_associated_token_address;
 use structopt::StructOpt;
 use taker::{NFTDeposit, NFTPool, TakerError};
+
 #[derive(Debug, StructOpt)]
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
 struct Opt {
@@ -18,7 +20,7 @@ struct Opt {
     taker_program_address: Option<Pubkey>,
 
     #[structopt(long, env)]
-    borrower_wallet_keypair: Keypair,
+    borrower_wallet_keypair: String,
 
     #[structopt(long, env)]
     nft_mint_address: Pubkey,
@@ -35,9 +37,10 @@ fn main() -> Result<()> {
         .taker_program_address
         .unwrap_or_else(load_program_from_idl);
 
-    let borrower_wallet_keypair = &opt.borrower_wallet_keypair;
+    let borrower_wallet_keypair =
+        keypair_of(&Opt::clap().get_matches(), "borrower-wallet-keypair").unwrap();
 
-    let client = Client::new(Cluster::Devnet, borrower_wallet_keypair.clone().0);
+    let client = Client::new(get_cluster(), Keypair::copy(&borrower_wallet_keypair));
     let program = client.program(program_id);
 
     let pool = NFTPool::get_address(&program.id());
@@ -67,7 +70,7 @@ fn main() -> Result<()> {
         .args(taker::instruction::WithdrawNft {
             deposit_id: opt.deposit_id,
         })
-        .signer(&**borrower_wallet_keypair)
+        .signer(&borrower_wallet_keypair)
         .send();
 
     match resp {

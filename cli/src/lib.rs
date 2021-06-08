@@ -1,3 +1,4 @@
+use anchor_client::Cluster;
 use derive_more::Deref;
 use serde::Deserialize;
 use serde_json::from_reader;
@@ -6,6 +7,12 @@ use std::{fs::File, str::FromStr};
 
 #[derive(Debug, Deref)]
 pub struct Keypair(#[deref] pub solana_sdk::signature::Keypair, String);
+
+impl Keypair {
+    pub fn copy(key: &solana_sdk::signature::Keypair) -> solana_sdk::signature::Keypair {
+        solana_sdk::signature::Keypair::from_bytes(&key.to_bytes()).unwrap()
+    }
+}
 
 impl FromStr for Keypair {
     type Err = String;
@@ -36,4 +43,11 @@ pub fn load_program_from_idl() -> Pubkey {
     let f = File::open("target/idl/taker.json").unwrap();
     let m: IDL = from_reader(f).unwrap();
     m.metadata.address.parse().unwrap()
+}
+
+pub fn get_cluster() -> Cluster {
+    Cluster::Custom(
+        "https://api.devnet.solana.com".into(),
+        "wss://api.devnet.solana.com".into(),
+    )
 }

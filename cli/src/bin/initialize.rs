@@ -1,6 +1,7 @@
-use anchor_client::{Client, Cluster};
+use anchor_client::Client;
 use anyhow::Result;
-use cli::Keypair;
+use cli::{get_cluster, Keypair};
+use solana_clap_utils::input_parsers::keypair_of;
 use solana_sdk::{
     commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signer, system_program, sysvar,
     transaction::Transaction,
@@ -15,7 +16,7 @@ struct Opt {
     taker_program_address: Option<Pubkey>,
 
     #[structopt(long, env)]
-    pool_owner_keypair: Keypair,
+    pool_owner_keypair: String,
 
     #[structopt(long, env)]
     tkr_mint_address: Pubkey,
@@ -36,7 +37,9 @@ fn main() -> Result<()> {
         .unwrap_or_else(cli::load_program_from_idl);
     println!("program_id: {}", program_id);
 
-    let client = Client::new(Cluster::Devnet, opt.pool_owner_keypair.clone().0);
+    let pool_owner_keypair = keypair_of(&Opt::clap().get_matches(), "pool-owner-keypair").unwrap();
+
+    let client = Client::new(get_cluster(), Keypair::copy(&pool_owner_keypair));
     let program = client.program(program_id);
 
     let pool = NFTPool::get_address(&program.id());
@@ -45,7 +48,7 @@ fn main() -> Result<()> {
         .request()
         .accounts(taker::accounts::AccountsInitialize {
             pool,
-            pool_owner: opt.pool_owner_keypair.pubkey(),
+            pool_owner: pool_owner_keypair.pubkey(),
 
             tkr_mint: opt.tkr_mint_address,
             pool_tkr_account: spl_associated_token_account::get_associated_token_address(
@@ -71,7 +74,7 @@ fn main() -> Result<()> {
             rent: sysvar::rent::id(),
         })
         .args(taker::instruction::Initialize {})
-        .signer(&*opt.pool_owner_keypair)
+        .signer(&pool_owner_keypair)
         .send()?;
 
     println!("The transaction is {}", tx);
@@ -86,34 +89,34 @@ fn main() -> Result<()> {
             spl_token::instruction::transfer(
                 &spl_token::id(),
                 &spl_associated_token_account::get_associated_token_address(
-                    &opt.pool_owner_keypair.pubkey(),
+                    &pool_owner_keypair.pubkey(),
                     &opt.tai_mint_address,
                 ),
                 &spl_associated_token_account::get_associated_token_address(
                     &pool,
                     &opt.tai_mint_address,
                 ),
-                &opt.pool_owner_keypair.pubkey(),
-                &[&opt.pool_owner_keypair.pubkey()],
+                &pool_owner_keypair.pubkey(),
+                &[&pool_owner_keypair.pubkey()],
                 1000 * 10u64.pow(9),
             )?,
             spl_token::instruction::transfer(
                 &spl_token::id(),
                 &spl_associated_token_account::get_associated_token_address(
-                    &opt.pool_owner_keypair.pubkey(),
+                    &pool_owner_keypair.pubkey(),
                     &opt.tkr_mint_address,
                 ),
                 &spl_associated_token_account::get_associated_token_address(
                     &pool,
                     &opt.tkr_mint_address,
                 ),
-                &opt.pool_owner_keypair.pubkey(),
-                &[&opt.pool_owner_keypair.pubkey()],
+                &pool_owner_keypair.pubkey(),
+                &[&pool_owner_keypair.pubkey()],
                 1000 * 10u64.pow(9),
             )?,
         ],
-        Some(&opt.pool_owner_keypair.pubkey()),
-        &[&opt.pool_owner_keypair.0],
+        Some(&pool_owner_keypair.pubkey()),
+        &[&pool_owner_keypair],
         h,
     ))?;
 

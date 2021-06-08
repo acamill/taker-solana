@@ -1,5 +1,6 @@
-use anchor_client::{Client, Cluster};
+use anchor_client::Client;
 use anyhow::Result;
+use cli::get_cluster;
 use rand::rngs::OsRng;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
@@ -23,7 +24,7 @@ fn main() -> Result<()> {
 
     let pool_account = NFTPool::get_address(&program_id);
 
-    let client = Client::new(Cluster::Devnet, Keypair::generate(&mut OsRng));
+    let client = Client::new(get_cluster(), Keypair::generate(&mut OsRng));
     let program = client.program(program_id);
 
     let content: NFTPool = program.account(pool_account)?;

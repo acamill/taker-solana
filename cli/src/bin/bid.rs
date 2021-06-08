@@ -1,6 +1,7 @@
-use anchor_client::{Client, Cluster};
+use anchor_client::Client;
 use anyhow::Result;
-use cli::{load_program_from_idl, Keypair};
+use cli::{get_cluster, load_program_from_idl, Keypair};
+use solana_clap_utils::input_parsers::keypair_of;
 use solana_sdk::{pubkey::Pubkey, signature::Signer, system_program, sysvar};
 use spl_associated_token_account::get_associated_token_address;
 use structopt::StructOpt;
@@ -13,7 +14,7 @@ struct Opt {
     taker_program_address: Option<Pubkey>,
 
     #[structopt(long, env)]
-    lender_wallet_keypair: Keypair,
+    lender_wallet_keypair: String,
 
     #[structopt(long, env)]
     dai_mint_address: Pubkey,
@@ -22,7 +23,7 @@ struct Opt {
     nft_mint_address: Pubkey,
 
     #[structopt(long)]
-    price: u64,
+    price: f64,
 
     #[structopt(long)]
     qty: u64,
@@ -36,9 +37,10 @@ fn main() -> Result<()> {
         .taker_program_address
         .unwrap_or_else(load_program_from_idl);
 
-    let lender_wallet_keypair = &opt.lender_wallet_keypair;
+    let lender_wallet_keypair =
+        keypair_of(&Opt::clap().get_matches(), "lender-wallet-keypair").unwrap();
 
-    let client = Client::new(Cluster::Devnet, lender_wallet_keypair.clone().0);
+    let client = Client::new(get_cluster(), Keypair::copy(&lender_wallet_keypair));
     let program = client.program(program_id);
 
     let pool = NFTPool::get_address(&program.id());
@@ -50,26 +52,26 @@ fn main() -> Result<()> {
             lender_wallet_account: lender_wallet_keypair.pubkey(),
 
             nft_mint: opt.nft_mint_address,
-            lender_dai_account: dbg!(get_associated_token_address(
+            lender_dai_account: get_associated_token_address(
                 &lender_wallet_keypair.pubkey(),
-                &opt.dai_mint_address
-            )),
+                &opt.dai_mint_address,
+            ),
 
-            bid_account: dbg!(NFTBid::get_address(
+            bid_account: NFTBid::get_address(
                 &program_id,
                 &opt.nft_mint_address,
                 &lender_wallet_keypair.pubkey(),
-            )),
+            ),
 
             spl_program: spl_token::id(),
             system_program: system_program::id(),
             rent: sysvar::rent::id(),
         })
         .args(taker::instruction::PlaceBid {
-            price: opt.price,
+            price: (opt.price * 10f64.powf(9.)) as u64,
             qty: opt.qty,
         })
-        .signer(&**lender_wallet_keypair)
+        .signer(&lender_wallet_keypair)
         .send()?;
 
     println!("The transaction is {}", tx);

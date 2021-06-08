@@ -25,7 +25,7 @@ pub struct NFTPool {
     pub tai_mint: Pubkey,
     pub dai_mint: Pubkey,
     pub incentive: u64,         // incentive amount when user mortgage their NFT
-    pub max_loan_duration: i64, // max loan duration before liquidation
+    pub max_loan_duration: i64, // max loan duration before liquidation, secs
     pub service_fee_rate: u64,  // in bp, one ten thousandth, fee rate charged by taker
     pub interest_rate: u64,     // in bp, one ten thousandth
     pub mortgage_rate: u64,     // in bp, mortgage rate to calculate real borrow amount
@@ -469,13 +469,14 @@ pub mod taker {
 
         // transfer DAI to the pool
         anchor_spl::token::transfer(
-            CpiContext::new(
+            CpiContext::new_with_signer(
                 spl_program.clone(),
                 anchor_spl::token::Transfer {
                     from: lender_dai_account.to_account_info(),
                     to: pool_dai_account.to_account_info(),
-                    authority: lender_wallet_account.to_account_info(), // The pool is the delegate
+                    authority: pool.to_account_info(), // The pool is the delegate
                 },
+                &[&[NFTPool::SEED, &[pool.bump_seed]]],
             ),
             total_amount,
         )?;
@@ -561,7 +562,7 @@ pub mod taker {
         )?;
 
         let lender_income = interest.checked_sub(fee).unwrap();
-        let repayed_amount = loan.borrowed_amount.checked_add(lender_income).unwrap();
+        let repayed_amount = loan.total_amount.checked_add(lender_income).unwrap();
 
         // transfer the DAI to the pool, waiting for the lender to withdraw
         anchor_spl::token::transfer(

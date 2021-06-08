@@ -1,11 +1,11 @@
-use anchor_client::{Client, Cluster};
+use anchor_client::Client;
 use anyhow::Result;
-use cli::Keypair;
+use cli::get_cluster;
+use solana_clap_utils::input_parsers::keypair_of;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signer;
 use structopt::StructOpt;
 use taker::NFTBid;
-
 #[derive(Debug, StructOpt)]
 #[structopt(name = "transact", about = "Making transactions to the Taker Protocol")]
 struct Opt {
@@ -16,13 +16,17 @@ struct Opt {
     nft_mint_address: Pubkey,
 
     #[structopt(long, env)]
-    lender_wallet_keypair: Keypair,
+    lender_wallet_keypair: String,
 }
 
 fn main() -> Result<()> {
     solana_logger::setup_with("solana=debug");
 
     let opt = Opt::from_args();
+
+    let lender_wallet_keypair =
+        keypair_of(&Opt::clap().get_matches(), "lender-wallet-keypair").unwrap();
+
     let program_id = opt
         .taker_program_address
         .unwrap_or_else(cli::load_program_from_idl);
@@ -30,10 +34,10 @@ fn main() -> Result<()> {
     let bid_account = NFTBid::get_address(
         &program_id,
         &opt.nft_mint_address,
-        &opt.lender_wallet_keypair.pubkey(),
+        &lender_wallet_keypair.pubkey(),
     );
 
-    let client = Client::new(Cluster::Devnet, opt.lender_wallet_keypair.clone().0);
+    let client = Client::new(get_cluster(), lender_wallet_keypair);
     let program = client.program(program_id);
 
     let content: NFTBid = program.account(bid_account)?;
