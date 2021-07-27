@@ -12,9 +12,9 @@ no-entrypoint = []
 no-idl = []
 
 [dependencies]
-anchor-lang = {path = "../../../anchor/lang", version = "0.7"}
-anchor-spl = {path = "../../../anchor/spl", version = "0.7"}
-borsh = "0.8"
+anchor-lang = {version = "0.11"}
+anchor-spl = {version = "0.11"}
+borsh = "0.9"
 fehler = "1"
 num-derive = "0.3"
 solana-program = "1"
